@@ -51,7 +51,3 @@ export type StartRunInputSchema = z.infer<typeof startRunInputSchema>;
 export type CancelRunInputSchema = z.infer<typeof cancelRunInputSchema>;
 export type StartDownloadInputSchema = z.infer<typeof startDownloadInputSchema>;
 export type ExportReportInputSchema = z.infer<typeof exportReportInputSchema>;
-
-export const previewBoundsSchema = z.object({ x: z.number().int().nonnegative(), y: z.number().int().nonnegative(), width: z.number().int().positive(), height: z.number().int().positive() }).strict();
-export const setPreviewInputSchema = z.object({ runId: idSchema, bounds: previewBoundsSchema.nullable() }).strict();
-export const emptyInputSchema = z.undefined();

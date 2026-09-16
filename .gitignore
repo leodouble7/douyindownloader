@@ -1,4 +1,7 @@
 .worktrees/
 .superpowers/
-node_modules/
+node_modules
+downloads/
 out/
+test-results/
+playwright-report/

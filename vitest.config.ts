@@ -5,8 +5,15 @@ export default defineConfig({
     projects: [
       {
         test: {
+          name: 'renderer',
+          include: ['tests/unit/**/*.test.tsx'],
+          environment: 'jsdom'
+        }
+      },
+      {
+        test: {
           name: 'unit',
-          include: ['tests/unit/**/*.test.{ts,tsx}'],
+          include: ['tests/unit/**/*.test.ts'],
           environment: 'node'
         }
       },

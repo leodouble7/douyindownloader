@@ -5,8 +5,10 @@
   "description": "Authorized media access-control verification desktop lab",
   "main": "out/main/index.js",
   "scripts": {
+    "douyin": "node scripts/douyin.cjs",
+    "build:douyin": "node scripts/build-douyin.cjs",
     "dev": "electron-vite dev",
-    "build": "electron-vite build && node scripts/copy-output-worker.cjs",
+    "build": "electron-vite build",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
@@ -17,7 +19,9 @@
     "build:windows-output": "node scripts/build-windows-output.cjs",
     "test:windows-output": "vitest run --project integration tests/integration/windows-output.test.ts",
     "build:windows-media-runner": "node scripts/build-windows-media-runner.cjs",
-    "test:windows-media": "vitest run --project integration tests/integration/media-process.test.ts tests/integration/windows-media-runner.test.ts tests/integration/ffmpeg-adapter.test.ts"
+    "test:windows-media": "vitest run --project integration tests/integration/media-process.test.ts tests/integration/windows-media-runner.test.ts tests/integration/ffmpeg-adapter.test.ts",
+    "verify:design": "node scripts/verify-design.cjs",
+    "start": "electron-vite preview"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
@@ -45,6 +49,7 @@
     "electron": "^39.0.0",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
+    "esbuild": "^0.25.12",
     "eslint": "^9.38.0",
     "jsdom": "^27.0.1",
     "typescript": "^5.9.3",

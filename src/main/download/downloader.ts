@@ -58,7 +58,8 @@ export class Downloader {
     const maxConcurrency = bounded(settings.maxConcurrency, 4, 1, 4);
     const id = input.resumeId ?? randomUUID();
     let terminal = false, completed = 0, publishing = false, committed = false;
-    const audit = (stage: 'queued' | 'before' | 'progress' | 'after' | 'failed' | 'cancelled', code?: string, denied = false, details: Record<string, unknown> = {}) => {
+    let lastProgressAt = -Infinity;
+    const audit = (stage: 'queued' | 'before' | 'receiving' | 'progress' | 'after' | 'failed' | 'cancelled', code?: string, denied = false, details: Record<string, unknown> = {}) => {
       if (terminal) return;
       const isTerminal = ['after', 'failed', 'cancelled'].includes(stage);
       if (!isTerminal && !context.isActive(runId)) return;
@@ -131,7 +132,13 @@ export class Downloader {
         const start = completed, end = start + Math.min(chunkBytes, total! - start) - 1;
         let next: { end: number; hash: Hash; detector: StreamingEncryptionClassifier };
         for (let attempt = 0; ; attempt++) {
-          try { next = await this.receive(grant, start, end, workspace, hash, detector, combined); break; }
+          try { next = await this.receive(grant, start, end, workspace, hash, detector, combined, receivedBytes => {
+            const now = performance.now();
+            if (now - lastProgressAt < 200) return;
+            lastProgressAt = now;
+            // Received bytes are display progress; completedBytes continues to mean durable verified coverage.
+            audit('receiving', undefined, false, { receivedBytes, totalBytes: total });
+          }); break; }
           catch (error) {
             await workspace.truncate(completed);
             if (combined.aborted || attempt >= retries || !retryable(error)) throw error;
@@ -184,7 +191,7 @@ export class Downloader {
     }
   }
 
-  private async receive(grant: DownloadGrant, start: number, end: number, file: OutputWorkspace, hash: Hash, detector: StreamingEncryptionClassifier, signal: AbortSignal): Promise<{ end: number; hash: Hash; detector: StreamingEncryptionClassifier }> {
+  private async receive(grant: DownloadGrant, start: number, end: number, file: OutputWorkspace, hash: Hash, detector: StreamingEncryptionClassifier, signal: AbortSignal, onReceived: (bytes: number) => void): Promise<{ end: number; hash: Hash; detector: StreamingEncryptionClassifier }> {
     const { context, runId, transport } = this.options;
     let opened: OpenResponse | undefined;
     try {
@@ -214,7 +221,7 @@ export class Downloader {
         nextDetector.push(chunk);
         if (nextDetector.encrypted) throw new DownloadError('encrypted');
         await file.write(chunk, start + received);
-        nextHash.update(chunk); received += chunk.length;
+        nextHash.update(chunk); received += chunk.length; onReceived(start + received);
       }
       signal.throwIfAborted();
       if (!response.complete || received !== expected) throw new DownloadError('premature-eof');

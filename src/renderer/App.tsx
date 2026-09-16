@@ -1,37 +1,99 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useStore } from 'zustand';
-import type { ApiResult, StartRunInput } from '../shared/contracts';
-import { runStore, selectors } from './store/run-store';
-import { NewRunForm } from './components/NewRunForm';
-import { TargetPreview } from './components/TargetPreview';
-import { RunTimeline } from './components/RunTimeline';
-import { MediaTracks } from './components/MediaTracks';
-import { ProbeMatrix } from './components/ProbeMatrix';
-import { DownloadProgress } from './components/DownloadProgress';
-import { ReportView } from './components/ReportView';
-import { Empty, formatTime, Panel, Status } from './components/ui';
-type View = 'new' | 'live' | 'result' | 'history';
-const views: [View, string][] = [['new', '新建测试'], ['live', '实时工作台'], ['result', '结果报告'], ['history', '测试历史']];
-const terminal = (status?: string) => !!status && ['completed', 'partial', 'cancelled', 'interrupted'].includes(status);
-export function App() {
-  const state = useStore(runStore); const { snapshot, events, history } = state;
-  const [view, setView] = useState<View>('new'), [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [error, setError] = useState(''), [selectedEventId, setSelectedEventId] = useState<string>(), [trackIds, setTracks] = useState<string[]>([]), [historyPage, setHistoryPage] = useState(0), [historyLoading, setHistoryLoading] = useState(false);
-  const current = useRef<string | undefined>(undefined), outputDirectory = useRef(''), requestVersion = useRef(0), selectionKey = useRef(''), busyRef = useRef(false);
-  const read = useCallback(async (runId: string) => { const version = ++requestVersion.current; const result = await window.mediaLab.getRun({ runId }); if (version !== requestVersion.current || current.current !== runId) return; if (result.ok) runStore.getState().setSnapshot(result.value); else setError(result.error.message); }, []);
-  const loadHistory = useCallback(async () => { if (!window.mediaLab) return; setHistoryLoading(true); try { const r = await window.mediaLab.listHistory(); if (r.ok) runStore.getState().setHistory(r.value); else setError(r.error.message); } catch { setError('历史记录读取失败，请重试。'); } finally { setHistoryLoading(false); } }, []);
-  useEffect(() => { if (!window.mediaLab) return; const off = window.mediaLab.onRunEvent(e => { if (e.runId === current.current) runStore.getState().append([e]); }); const timer = setInterval(() => { if (current.current && !busyRef.current) void read(current.current).catch(() => setError('连接暂时不可用，已显示最后一次证据。')); }, 1500); return () => { off(); clearInterval(timer); requestVersion.current++; }; }, [read]);
-  useEffect(() => { document.title = `${views.find(v => v[0] === view)?.[1]} · 媒体验证工作台`; if (view === 'history') void loadHistory(); }, [view, loadHistory]);
-  const asset = selectors.currentAsset(state);
-  useEffect(() => { const key = `${snapshot?.runId}:${asset?.id}`; if (asset && selectionKey.current !== key) { selectionKey.current = key; setTracks(asset.selectedTrackIds); } }, [asset, snapshot?.runId]);
-  const act = async <T,>(task: () => Promise<ApiResult<T>>, success?: (value: T) => void) => { if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(''); setNotice(''); try { const r = await task(); if (!r.ok) setError(r.error.message); else success?.(r.value); if (current.current) await read(current.current); } catch { setError('操作未完成，当前证据已保留，请重试。'); } finally { busyRef.current = false; setBusy(false); } };
-  const start = async (input: StartRunInput) => { if (!window.mediaLab) { setError('请在桌面应用中启动授权测试。'); return; } await act(() => window.mediaLab.startRun(input), r => { current.current = r.runId; outputDirectory.current = input.outputDirectory; runStore.getState().reset(); setView('live'); setNotice('运行已创建，正在隔离环境中观察页面。'); }); };
-  const evidence = (id: string) => { setSelectedEventId(id); setView('live'); };
-  const reopen = async (runId: string) => { current.current = runId; selectionKey.current = ''; await act(() => window.mediaLab.getRun({ runId }), s => { runStore.getState().setSnapshot(s); setView('result'); }); };
-  const active = snapshot && !terminal(snapshot.status);
-  return <div className="app-shell"><a className="skip-link" href="#main-content">跳至主要内容</a><header className="app-header"><div className="brand"><span className="brand-mark" aria-hidden="true">M<span>·</span>L</span><div><strong>媒体验证工作台</strong><small>MEDIA SECURITY LAB</small></div></div><nav aria-label="主导航">{views.map(([id, label]) => <button key={id} className={view === id ? 'nav-item active' : 'nav-item'} aria-current={view === id ? 'page' : undefined} disabled={(id === 'live' || id === 'result') && !snapshot} onClick={() => setView(id)}>{label}</button>)}</nav><div className="local-indicator"><span />本地证据 · 离线保存</div></header><div className="system-message" role="status" aria-live="polite"><span className={error ? 'error-text' : ''}>{error || notice || '授权范围内观察，以服务端证据验证。工具异常不代表防护有效。'}</span>{error && <button className="button ghost" onClick={() => { setError(''); if (view === 'history') void loadHistory(); else if (current.current) void read(current.current).catch(() => setError('读取失败，请稍后重试。')); }}>重新读取</button>}</div><main id="main-content" tabIndex={-1}>
-    <div hidden={view !== 'new'}><div className="page-heading"><div><p className="eyebrow">AUTHORIZED INSPECTION / 01</p><h1>从一个播放页面，<br />看清真实的访问边界。</h1><p className="page-description">观察请求、检验假设、核对证据。每一步都有解释。</p></div><span className="desk-stamp">LOCAL<br />EVIDENCE<br /><strong>LAB / 01</strong></span></div><div className="new-run-layout"><Panel title="配置授权测试" number="01"><NewRunForm onStart={start} busy={busy || !!active} /></Panel><aside className="method-aside"><p className="eyebrow">INSPECTION NOTES</p><h2>可复核的过程，<br />比一句“安全”更重要。</h2><ol className="method-list"><li><span>01</span><div><strong>观察播放链路</strong><p>在隔离页面中记录网络请求、Worker、MSE 与媒体轨道。</p></div></li><li><span>02</span><div><strong>验证服务端行为</strong><p>改变有界请求条件，区分可访问、明确拒绝与无法判定。</p></div></li><li><span>03</span><div><strong>保留证据与结论</strong><p>将发现链接到实际步骤，保存脱敏报告与验证产物。</p></div></li></ol><div className="method-note"><strong>完整下载由你决定</strong><p>标准模式只采样短范围。完整下载模式仍需在观察结束后再次点击启动。</p></div><p className="muted">敏感参数保留在活动运行内存；普通界面、历史和报告仅使用脱敏记录。</p></aside></div></div>
-    {view === 'live' && snapshot && <><div className="workbench-heading"><div><p className="eyebrow">LIVE WORKBENCH / 证据工作台</p><h1>{snapshot.targetLabel}</h1><p className="muted">{formatTime(snapshot.startedAt)} · {snapshot.mode === 'observe' ? '只观察' : snapshot.mode === 'standard' ? '标准安全验证' : '完整下载验证'}</p></div><div className="run-actions"><Status value={snapshot.status} />{active && <button className="button danger-outline" disabled={busy} onClick={() => void act(() => window.mediaLab.cancelRun({ runId: snapshot.runId }), () => setNotice('运行已取消，已记录的证据保留在历史中。'))}>取消运行</button>}<button className="button outline" onClick={() => setView('result')}>查看结果 ↗</button></div></div><div className="workbench-grid"><div className="preview-column"><Panel title="隔离页面" number="01"><TargetPreview runId={snapshot.runId} active={snapshot.status === 'observing'} /><div className="observation-controls"><p>{snapshot.status === 'observing' ? '可在目标页面内操作播放。默认观察 15 秒，也可手动结束。' : '观察结束，后续动作会持续写入证据时间线。'}</p><button className="button outline full-width" disabled={busy || snapshot.status !== 'observing'} onClick={() => void act(() => window.mediaLab.finishObservation({ runId: snapshot.runId }))}>结束观察并验证</button></div></Panel><div className="scope-note"><strong>本次范围</strong><p>仅测试当前页面直接产生的媒体请求。加密内容不尝试解密。</p><span>证据 {events.length} 条 · 轨道 {snapshot.tracks.length} 条</span></div></div><Panel title="证据时间线" number="02" className="timeline-panel" aside={<span className="live-count">{events.length} 条</span>}><RunTimeline events={events} selectedEventId={selectedEventId} /></Panel><div className="inspector-column"><Panel title="媒体资产与轨道" number="03"><MediaTracks assets={snapshot.assets} tracks={snapshot.tracks} assetId={state.selectedAssetId} onAsset={id => state.selectAsset(id)} selectedTrackIds={trackIds} onSelect={setTracks} /></Panel><Panel title="服务端验证矩阵" number="04"><ProbeMatrix probes={snapshot.probes.filter(p => !asset || asset.trackIds.includes(p.trackId))} onEvidence={evidence} /></Panel></div></div><Panel title="下载与封装进度" number="05" className="progress-drawer" aside={<span className="muted">连续字节 · 完整性 · ffprobe</span>}><DownloadProgress events={selectors.downloads(state)} artifacts={snapshot.artifacts} />{snapshot.status === 'ready' && <div className="download-confirmation"><div><strong>有界验证已完成，等待你的决定</strong><p>选中 {trackIds.length} 条轨道。仅可下载已确认可访问且未检测到加密的媒体。</p></div><div className="button-row"><button className="button outline" disabled={busy} onClick={() => void act(() => window.mediaLab.finishRun({ runId: snapshot.runId }))}>仅生成报告</button><button className="button primary" disabled={busy || !trackIds.length} onClick={() => void act(() => window.mediaLab.startDownload({ runId: snapshot.runId, trackIds }))}>开始完整下载与验证</button></div></div>}</Panel></>}
-    {view === 'result' && snapshot && <ReportView snapshot={snapshot} onEvidence={evidence} busy={busy} onExport={async format => { await act(() => window.mediaLab.exportReport({ runId: snapshot.runId, format, outputDirectory: outputDirectory.current }), r => setNotice(`报告已验证并保存在：${r.path}`)); }} />}
-    {view === 'history' && <><div className="workbench-heading"><div><p className="eyebrow">RUN ARCHIVE / 本地记录</p><h1>测试历史</h1><p className="muted">保存脱敏证据与运行状态；最近 200 次运行。</p></div><button className="button outline" disabled={historyLoading} onClick={() => void loadHistory()}>{historyLoading ? '正在读取…' : '刷新历史'}</button></div><Panel title="已保存的运行" number="01"><div className="history-frame" aria-busy={historyLoading}>{historyLoading && !history.length ? <Empty title="正在读取本地历史">读取完成后即可重新打开脱敏证据。</Empty> : history.length ? <table className="history-table"><caption className="sr-only">持久化的本地测试历史</caption><thead><tr><th>目标与时间</th><th>验证模式</th><th>状态</th><th>操作</th></tr></thead><tbody>{history.slice(historyPage * 20, (historyPage + 1) * 20).map(h => <tr key={h.runId}><th scope="row">{h.targetLabel}<small>{formatTime(h.startedAt)}</small></th><td>{h.mode === 'observe' ? '只观察' : h.mode === 'standard' ? '标准验证' : '完整下载'}</td><td><Status value={h.status} /></td><td><button className="button ghost" disabled={busy} onClick={() => void reopen(h.runId)}>打开证据 ↗</button></td></tr>)}</tbody></table> : <Empty title="还没有测试记录">创建第一个授权测试后，运行证据会保存在这里。</Empty>}</div><div className="pagination"><span>共 {history.length} 次运行</span><div><button className="button ghost" disabled={historyPage === 0} onClick={() => setHistoryPage(p => p - 1)}>上一页</button><span>{historyPage + 1} / {Math.max(1, Math.ceil(history.length / 20))}</span><button className="button ghost" disabled={(historyPage + 1) * 20 >= history.length} onClick={() => setHistoryPage(p => p + 1)}>下一页</button></div></div></Panel></>}
-  </main><footer className="app-footer"><span>MEDIA SECURITY LAB</span><span>每个观察都是证据，每个结论都有边界。</span><span>本地时间 · {Intl.DateTimeFormat().resolvedOptions().timeZone}</span></footer></div>;
+import { useEffect, useRef, useState } from 'react';
+import { isDownloadActive, type DesktopDownloaderApi, type DownloadSnapshot } from '../shared/desktop';
+import { Icon } from './components/Icon';
+import { DownloadTask } from './components/DownloadTask';
+import { FailureMessage } from './components/FailureMessage';
+
+const initial: DownloadSnapshot = { sequence: -1, phase: 'idle', directory: '', message: '', candidates: [], tracks: [] };
+
+export function App({ api = window.downloader }: { api?: DesktopDownloaderApi }) {
+  const [state, setState] = useState(initial);
+  const [url, setUrl] = useState('');
+  const [submittedUrl, setSubmittedUrl] = useState('');
+  const [directory, setDirectory] = useState('');
+  const [error, setError] = useState('');
+  const [fields, setFields] = useState({ url: '', directory: '' });
+  const [pending, setPending] = useState(false);
+  const [ready, setReady] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const directoryButton = useRef<HTMLButtonElement>(null);
+  const operationPending = useRef(false);
+  const lastSequence = useRef(-1);
+  const touchedDirectory = useRef(false);
+  const busy = isDownloadActive(state.phase);
+  const displayedDirectory = busy ? state.resultDirectory ?? directory : directory;
+
+  useEffect(() => {
+    if (!api) { setError('请在桌面应用中打开下载工具'); return; }
+    let alive = true;
+    lastSequence.current = -1;
+    const accept = (next: DownloadSnapshot) => {
+      if (!alive || next.sequence <= lastSequence.current) return;
+      lastSequence.current = next.sequence;
+      setState(next); setReady(true);
+      if (!touchedDirectory.current) setDirectory(next.directory);
+    };
+    const unsubscribe = api.onState(accept);
+    void api.getState().then(accept).catch(() => { if (alive) setError('无法连接下载服务，请重新启动应用'); });
+    return () => { alive = false; unsubscribe(); };
+  }, [api]);
+
+  const action = async (operation: () => Promise<unknown>) => {
+    if (operationPending.current) return;
+    operationPending.current = true; setPending(true); setError('');
+    try { await operation(); }
+    catch (failure) {
+      const message = failure instanceof Error ? failure.message.replace(/^Error invoking remote method 'downloader:[^']+': (?:Error: )?/, '') : '';
+      setError(message || '操作失败，请重试');
+    }
+    finally { operationPending.current = false; setPending(false); }
+  };
+  const startDownload = (interactive = false) => {
+    if (busy || pending || !ready) return;
+    if (!validDouyinLink(url)) { setFields({ url: '请输入一个有效的抖音链接或分享文字', directory: '' }); input.current?.focus(); return; }
+    if (!directory) { setFields({ url: '', directory: '请选择视频的保存文件夹' }); directoryButton.current?.focus(); return; }
+    setFields({ url: '', directory: '' });
+    const submitted = url.trim(), previous = submittedUrl;
+    setSubmittedUrl(submitted);
+    void action(async () => {
+      try { await api!.start({ url: submitted, directory, ...(interactive ? { interactive: true } : {}) }); }
+      catch (failure) { setSubmittedUrl(previous); throw failure; }
+    });
+  };
+  const chooseDirectory = () => void action(async () => {
+    const selected = await api!.chooseDirectory();
+    if (selected) { touchedDirectory.current = true; setDirectory(selected); setFields(previous => ({ ...previous, directory: '' })); }
+  });
+
+  return <div className="app-shell single-page">
+    <h1 className="sr-only">视频下载</h1>
+    <main className="download-workspace" aria-label="下载工作区">
+      <form className="entry-form" aria-label="下载设置" noValidate onSubmit={event => { event.preventDefault(); startDownload(); }}>
+        <div className="form-grid">
+          <div className="field"><label htmlFor="video-url">视频链接</label><div className="input-wrap"><Icon name="link" size={17} /><input ref={input} id="video-url" value={busy ? submittedUrl || url : url} onChange={event => { setUrl(event.target.value); setFields(previous => ({ ...previous, url: '' })); setError(''); }} placeholder="粘贴抖音链接或分享文字" readOnly={busy} disabled={pending || !ready} autoComplete="off" spellCheck={false} aria-invalid={!!fields.url} aria-describedby="url-error" />
+            {url && <button type="button" className="button icon-button" aria-label="清空视频地址" disabled={pending || busy} onClick={() => { setUrl(''); setFields(previous => ({ ...previous, url: '' })); input.current?.focus(); }}><Icon name="close" size={15} /></button>}
+          </div><p className="field-error" id="url-error" role={fields.url ? 'alert' : undefined}>{fields.url}</p></div>
+          <div className="field"><label htmlFor="output-directory">保存位置</label><div className="input-wrap"><Icon name="folder" size={17} /><input id="output-directory" value={displayedDirectory} readOnly placeholder="请选择保存文件夹" title={displayedDirectory} aria-invalid={!!fields.directory} aria-describedby="directory-error" /><button ref={directoryButton} type="button" className="button link" disabled={pending || !ready || busy} onClick={chooseDirectory}>选择文件夹</button></div><p className="field-error" id="directory-error" role={fields.directory ? 'alert' : undefined}>{fields.directory}</p></div>
+        </div>
+        {error && <div className="inline-error"><FailureMessage message={error} alert /></div>}
+        <div className="form-submit"><p>{busy ? '取消后可修改链接和保存位置' : '文件直接保存在此文件夹'}</p>
+          <button type={busy ? 'button' : 'submit'} className={busy ? 'button' : 'button primary'} disabled={pending || !ready} aria-busy={pending} onClick={busy ? event => { event.preventDefault(); void action(() => api!.cancel({ jobId: state.id! })); } : undefined}><Icon name={busy ? 'close' : 'download'} size={18} />{busy ? pending ? '正在处理…' : '取消下载' : '开始下载'}</button>
+        </div>
+        {!busy && !!state.queue?.some(item => item.canRetry) && <p className="inline-note">开始新下载后，无法重试这次的失败项；已保存文件会保留。</p>}
+      </form>
+      {!ready && !error && <p className="connection-status" role="status">正在连接…</p>}
+      {state.phase !== 'idle' && <DownloadTask state={state} pending={pending}
+        onSelect={(mode, selections) => void action(() => api!.select({ jobId: state.id!, mode, selections }))}
+        onRetry={taskId => void action(() => api!.retry({ jobId: state.id!, taskId }))}
+        onReveal={taskId => void action(() => api!.reveal({ jobId: state.id!, ...(taskId ? { taskId } : {}) }))}
+        onManualCapture={() => startDownload(true)} />}
+    </main>
+  </div>;
+}
+
+function validDouyinLink(value: string): boolean {
+  const matches = value.match(/https?:\/\/[^\s<>"'，。；、）】]+/g);
+  if (matches?.length !== 1) return false;
+  try { const url = new URL(matches[0]); return !url.username && !url.password && (url.hostname === 'douyin.com' || url.hostname.endsWith('.douyin.com')); }
+  catch { return false; }
 }

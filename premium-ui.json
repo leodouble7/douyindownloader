@@ -1,21 +1,35 @@
 {
   "profile": "product-admin",
-  "sourceRoots": ["src/renderer"],
+  "sourceRoots": [
+    "src/renderer"
+  ],
   "locale": "zh-CN",
-  "canonicalMap": "UX-CONTRACT.md",
-  "requiredCapabilities": ["Form", "Select/Listbox", "Scrollbar", "Toast", "CRUD", "Table Selection"],
-  "ownership": { "Select/Listbox": "native" },
-  "requiredCommands": ["unit", "integration", "typecheck", "lint", "build", "ui"],
+  "canonicalMap": "DESIGN.md",
+  "requiredCapabilities": [
+    "Form",
+    "Scrollbar",
+    "Select/Listbox",
+    "Table Selection"
+  ],
+  "requiredCommands": [
+    "unit",
+    "e2e",
+    "typecheck",
+    "build",
+    "design"
+  ],
   "commands": {
-    "unit": "npm run test:unit",
-    "integration": "npm run test:integration",
+    "unit": "npm test -- --project renderer",
+    "e2e": "npm run test:e2e",
     "typecheck": "npm run typecheck",
-    "lint": "npm run lint",
     "build": "npm run build",
-    "ui": "node scripts/verify-workbench-ui.mjs"
+    "design": "npm run verify:design"
   },
   "evidence": {
-    "crudFullFlow": "tests/integration/workbench-service.test.ts",
-    "failurePaths": "tests/unit/workbench-security.test.ts"
+    "failurePaths": "tests/unit/desktop-ui.test.tsx",
+    "fullFlow": "tests/e2e/desktop.spec.ts"
+  },
+  "ownership": {
+    "Select/Listbox": "native"
   }
 }

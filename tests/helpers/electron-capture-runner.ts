@@ -17,16 +17,17 @@ void app.whenReady().then(async () => {
     const firstSession = contents.session;
     // Cross-site iframe forces an actual child target/session in addition to the lab's same-site frame.
     await view.webContents.executeJavaScript(`(() => { const frame = document.createElement('iframe'); frame.src = ${JSON.stringify(baseUrl.replace('127.0.0.1', 'localhost') + '/open-range/frame')}; document.body.append(frame); })()`);
-    await contents.executeJavaScript(`globalThis.sharedCaptureWorker = new SharedWorker(URL.createObjectURL(new Blob([${JSON.stringify(`fetch('${baseUrl}/open-range/video.mp4', {headers:{Range:'bytes=256-383'}});`)}], {type:'application/javascript'})));`);
+    await contents.executeJavaScript(`globalThis.sharedCaptureWorker = new SharedWorker(URL.createObjectURL(new Blob([${JSON.stringify(`self.onconnect = ({ports}) => { ports[0].onmessage = () => fetch('${baseUrl}/open-range/video.mp4', {headers:{Range:'bytes=256-383'}}); };`)}], {type:'application/javascript'})));`);
     // Non-pausing auto-attach can miss a worker's first synchronous request. Exercise
     // a real subsequent request after its Network domain acknowledges activation.
     const workerDeadline = Date.now() + 2000;
-    const workerReady = () => {
-      const worker = observations.find((item) => item.kind === 'target' && item.targetType === 'worker');
+    const workerReady = (type: 'worker' | 'shared_worker') => {
+      const worker = observations.find((item) => item.kind === 'target' && item.targetType === type);
       return worker && events.some((event) => event.action === 'cdp-Network.enable:after' && event.evidence?.targetSession === worker.sessionId);
     };
-    while (Date.now() < workerDeadline && !workerReady()) await new Promise((resolve) => setTimeout(resolve, 25));
-    await contents.executeJavaScript("labWorker.postMessage('capture-request')");
+    while (Date.now() < workerDeadline && !(workerReady('worker') && workerReady('shared_worker'))) await new Promise((resolve) => setTimeout(resolve, 25));
+    if (!workerReady('worker') || !workerReady('shared_worker')) throw new Error('Worker Network domains did not become ready');
+    await contents.executeJavaScript("labWorker.postMessage('capture-request'); sharedCaptureWorker.port.start(); sharedCaptureWorker.port.postMessage('capture-request')");
     const isolated = await view.webContents.executeJavaScript("typeof require === 'undefined' && typeof process === 'undefined' && typeof window.mediaLab === 'undefined'");
     const summary = () => ({
       realPageIdentity: observations.some((item) => item.kind === 'target' && item.targetType === 'page' && /^[0-9A-F]{32}$/i.test(item.targetId)),

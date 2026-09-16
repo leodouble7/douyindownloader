@@ -203,28 +203,12 @@ export interface ExportReportInput {
   outputDirectory: string;
 }
 
-export type ApiErrorCode = 'INVALID_INPUT' | 'FORBIDDEN' | 'BUSY' | 'NOT_FOUND' | 'OUTPUT_NOT_AUTHORIZED' | 'REPORT_UNAVAILABLE' | 'OPERATION_FAILED';
-export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: { code: ApiErrorCode; message: string } };
-export type RunStatus = 'observing' | 'probing' | 'ready' | 'downloading' | 'reporting' | 'completed' | 'partial' | 'cancelled' | 'interrupted';
-export interface PreviewBounds { x: number; y: number; width: number; height: number }
-export interface UiTrack { id: string; assetId: string; kind: MediaTrackKind; mimeType?: string; codecs?: string; byteLength?: number; durationSeconds?: number; encrypted?: boolean; eligible?: boolean; incomplete?: boolean }
-export interface UiAsset { id: string; trackIds: string[]; selectedTrackIds: string[]; confidence: number; encrypted?: boolean }
-export interface UiProbe { id: string; trackId: string; name: string; outcome: ProbeOutcome; status?: number; bytesReceived?: number; eventIds: string[] }
-export interface UiArtifact { id: string; trackIds: string[]; byteLength: number; sha256: string; verification: 'verified' | 'unverified'; operation: 'download' | 'remux' }
-export interface UiReport { status: 'verified' | 'unavailable'; markdown?: string; json?: string; files: string[] }
-export interface RunHistoryItem { runId: string; status: RunStatus; mode: RunMode; targetLabel: string; startedAt: string; completedAt?: string }
-export interface WorkbenchSnapshot extends RunHistoryItem { events: RunEvent[]; assets: UiAsset[]; tracks: UiTrack[]; probes: UiProbe[]; findings: Finding[]; artifacts: UiArtifact[]; report: UiReport; }
 export interface MediaLabApi {
-  startRun(input: StartRunInput): Promise<ApiResult<{ runId: string }>>;
-  cancelRun(input: CancelRunInput): Promise<ApiResult<void>>;
-  chooseOutputDirectory(): Promise<ApiResult<string | null>>;
-  finishObservation(input: CancelRunInput): Promise<ApiResult<void>>;
-  finishRun(input: CancelRunInput): Promise<ApiResult<void>>;
-  getRun(input: CancelRunInput): Promise<ApiResult<WorkbenchSnapshot>>;
-  listHistory(): Promise<ApiResult<RunHistoryItem[]>>;
-  setPreview(input: { runId: string; bounds: PreviewBounds | null }): Promise<ApiResult<void>>;
-  startDownload(input: StartDownloadInput): Promise<ApiResult<{ downloadId: string }>>;
-  exportReport(input: ExportReportInput): Promise<ApiResult<{ path: string; content: string }>>;
+  startRun(input: StartRunInput): Promise<{ runId: string }>;
+  cancelRun(input: CancelRunInput): Promise<void>;
+  chooseOutputDirectory(): Promise<string | null>;
+  startDownload(input: StartDownloadInput): Promise<{ downloadId: string }>;
+  exportReport(input: ExportReportInput): Promise<{ path: string }>;
   onRunEvent(listener: (event: RunEvent) => void): () => void;
 }
 

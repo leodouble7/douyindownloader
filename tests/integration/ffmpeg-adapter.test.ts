@@ -50,6 +50,19 @@ it('remuxes six-second fixture tracks with stream-copy parameters and commits on
   expect(JSON.stringify(events)).not.toContain(fixtures.root); expect(JSON.stringify(events)).not.toContain(root);
   expect(await readdir(join(output, '..'))).toEqual(['result.mp4']);
 });
+it('remuxes B-frame video with a common decode-delay offset and verifies the saved file again', async () => {
+  const dir = await directory(), videoPath = join(dir, 'bframes.mp4');
+  const encoded = spawnSync(tools.ffmpeg.path, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=15', '-t', '6', '-an', '-c:v', 'libx264', '-bf', '4', '-x264-params', 'b-adapt=0', '-movflags', '+faststart', videoPath]);
+  expect(encoded.status, encoded.stderr.toString()).toBe(0);
+  const adapter = createMediaAdapter({ tools });
+  const input = await adapter.probeMedia(videoPath, signal());
+  const result = await adapter.remuxTracks(videoPath, fixtures.audioOnly, join(dir, 'result.mp4'), signal());
+  const reopened = await adapter.probeMedia(result.outputPath, signal());
+  expect(reopened.streams.map(s => s.kind)).toEqual(['video', 'audio']);
+  expect(reopened.streams[0].packetCount).toBe(input.streams[0].packetCount);
+  expect(reopened.streams[0].extradataHash).toBe(input.streams[0].extradataHash);
+  expect(reopened.durationSeconds).toBeCloseTo(6, 1);
+});
 
 it('refuses combined, wrong-order and incompatible-duration inputs before publication', async () => {
   const adapter = createMediaAdapter({ tools }); const output = join(await directory(), 'bad.mp4');

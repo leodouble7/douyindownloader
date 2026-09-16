@@ -69,7 +69,8 @@ it.each(['open-range', 'range-capped', 'signed-url', 'session-bound'])('complete
   expect(events.at(-1)?.evidence).toMatchObject({ sha256: artifact.sha256, totalBytes: artifact.byteLength });
   expect(events[0].inputSummary).toMatchObject({ maxConcurrency: 4, activeWorkers: 1 });
   expect(JSON.stringify(events)).not.toMatch(new RegExp(`secret-marker|${sig}|lab_session=lab-session`));
-});
+// The 1 KiB capped scenario durably flushes every interval; allow parallel-suite disk contention.
+}, 15_000);
 it('uses a single full interval for an uncapped server and exact actual endpoints for caps', async () => {
   for (const cap of [body.length, 1024]) {
     const ranges: string[] = [];
@@ -496,4 +497,20 @@ it.each([
   const previous = calls;
   await expect(state.download()).rejects.toMatchObject({ outcome: 'inconclusive' });
   expect(calls).toBe(previous);
+});
+
+it('reports bounded in-flight bytes before an HTTP range completes without claiming them as committed', async () => {
+  let slow = false; let release: (() => void) | undefined;
+  const url = await server((req, res) => {
+    if (!slow) { respond(req, res); return; }
+    res.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Range': `bytes 0-${body.length - 1}/${body.length}`, 'Content-Length': body.length, ETag: '"v1"' });
+    res.write(body.subarray(0, 1024)); release = () => res.end(body.subarray(1024));
+  });
+  const state = await setup(url, { timeoutMs: 5000 }); await state.probe(); slow = true;
+  const task = state.download();
+  try {
+    await expect.poll(() => state.repository.list(state.runId).find(e => e.action === 'download:receiving' && e.evidence?.receivedBytes === 1024), { timeout: 1500 }).toMatchObject({ evidence: { completedBytes: 0, receivedBytes: 1024, totalBytes: body.length } });
+  } finally { release?.(); await task; }
+  const progress = state.repository.list(state.runId).filter(e => e.action === 'download:receiving');
+  expect(progress.length).toBeLessThan(10); expect(await readFile((await task).path)).toEqual(body);
 });

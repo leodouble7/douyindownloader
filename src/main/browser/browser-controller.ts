@@ -1,14 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { WebContentsView, type BrowserWindow, type WebContents, type Session } from 'electron';
 import type { CaptureObservation } from '../../shared/contracts';
-import type { EphemeralRequest } from '../runs/run-orchestrator';
 import { CdpCapture, type CaptureEventSink } from './cdp-capture';
 import { ElectronDebuggerPort } from './debugger-port';
 
 export interface BrowserRun { runId: string; targetUrl: string; authorizationConfirmed: boolean; signal?: AbortSignal }
 export interface BrowserControllerOptions {
   host: BrowserWindow;
-  rememberRequest?: (runId: string, request: EphemeralRequest) => void;
   emit: CaptureEventSink;
   observe: (observation: CaptureObservation) => void;
 }
@@ -45,15 +43,15 @@ export class BrowserController {
         const protocol = new URL(details.url).protocol;
         callback({ cancel: !['http:', 'https:', 'blob:', 'data:', 'about:', 'ws:', 'wss:'].includes(protocol) });
       });
-      const capture = new CdpCapture({ runId: run.runId, port: new ElectronDebuggerPort(contents.debugger), emit: this.options.emit, observe: this.options.observe, rememberRequest: request => this.options.rememberRequest?.(run.runId, request), onError: () => { void this.close(run.runId).catch(() => undefined); } });
+      const capture = new CdpCapture({ runId: run.runId, port: new ElectronDebuggerPort(contents.debugger), emit: this.options.emit, observe: this.options.observe, onError: () => { void this.close(run.runId).catch(() => undefined); } });
       const abort = () => { void this.close(run.runId).catch(() => undefined); };
       run.signal?.addEventListener('abort', abort, { once: true });
       this.runs.set(run.runId, { view, contents, session, capture, removeAbort: () => run.signal?.removeEventListener('abort', abort) });
       contents.once('destroyed', abort);
       contents.once('render-process-gone', () => { this.audit(run.runId, 'target-renderer', 'failed'); abort(); });
       this.options.host.contentView.addChildView(view);
-      view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
-      view.setVisible(false);
+      const bounds = this.options.host.getContentBounds();
+      view.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
       this.audit(run.runId, 'browser-create', 'after');
       this.audit(run.runId, 'target-initialize', 'before');
       await contents.loadURL('about:blank');
@@ -69,13 +67,6 @@ export class BrowserController {
       await this.close(run.runId);
       throw error;
     }
-  }
-  setBounds(runId: string, bounds: { x: number; y: number; width: number; height: number } | null): void {
-    const active = this.runs.get(runId); if (!active || active.closing) return;
-    if (!bounds) { active.view.setVisible(false); return; }
-    const size = this.options.host.getContentBounds();
-    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isSafeInteger) || bounds.x < 12 || bounds.y < 160 || bounds.width < 1 || bounds.height < 1 || bounds.width > 640 || bounds.height > 420 || bounds.x + bounds.width > size.width - 12 || bounds.y + bounds.height > size.height - 12) { active.view.setVisible(false); throw new Error('Invalid target aperture'); }
-    active.view.setBounds(bounds); active.view.setVisible(true);
   }
   async close(runId: string): Promise<void> {
     const active = this.runs.get(runId);

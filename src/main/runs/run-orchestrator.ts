@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createSourceRequestReference, type SourceRequestIdentity, type RunEvent, type StartRunInput } from '../../shared/contracts';
 import { createSanitizedCapturedUrl, redactEvidence, redactHeaders, redactText, redactUrlValue } from '../security/redact';
-import { EventRepository, type RunEventInput, type SanitizedCapturedRequest } from './event-repository';
+import type { RunEventStore, RunEventInput, SanitizedCapturedRequest } from './event-repository';
 
 export interface EphemeralRequest {
   sourceIdentity?: SourceRequestIdentity;
@@ -36,7 +36,7 @@ export class RunOrchestrator {
   private readonly exitHandler = (): void => this.dispose();
 
   constructor(
-    private readonly repository: EventRepository,
+    private readonly repository: RunEventStore,
     private readonly onStoredEvent: (event: RunEvent) => void = () => undefined
   ) {
     process.once('exit', this.exitHandler);

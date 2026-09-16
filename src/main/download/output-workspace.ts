@@ -12,6 +12,7 @@ export interface WorkerPort {
   onMessage(callback: (message: WorkerMessage) => void): void;
   onExit(callback: () => void): void;
   terminate(): void;
+  whenExited?(): Promise<void>;
 }
 interface WorkerMessage { id?: number; value?: unknown; error?: string; code?: string; committed?: boolean }
 /** Task 11 can adapt Electron utilityProcess without changing the filesystem protocol. */
@@ -107,7 +108,7 @@ export class OutputWorkspace {
     this.pending.clear(); this.port.terminate();
   }
   async dispose(): Promise<void> {
-    if (this.disposed) return;
-    try { await this.call('dispose'); } finally { this.interrupt(); }
+    if (this.disposed) { await this.port.whenExited?.(); return; }
+    try { await this.call('dispose'); } finally { this.interrupt(); await this.port.whenExited?.(); }
   }
 }

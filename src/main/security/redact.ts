@@ -1,7 +1,7 @@
 import { createSanitizedMediaUrl, type SanitizedMediaUrl } from '../../shared/contracts';
 
 export const REDACTED_VALUE = '[REDACTED]';
-const SENSITIVE_NAME = /token|signature|^sig$|policy|credential|key|session|authorization|cookie/i;
+const SENSITIVE_NAME = /token|signature|^sign?$|^[ax][-_]bogus$|^x-gnarly$|policy|credential|key|session|authorization|cookie/i;
 const HTTP_URL_SUBSTRING = /https?:\/\/[^\s<>"'`;]+/gi;
 const AUTHORIZATION_FRAGMENT = /(\bauthorization\s*:\s*)[^\r\n]*/gi;
 const COOKIE_FRAGMENT = /(\bcookie\s*:\s*)[^\r\n]*/gi;

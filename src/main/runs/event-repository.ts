@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
-import type { WorkbenchSnapshot, RunHistoryItem, CapturedRequest, RunEvent, RunPhase, StepStatus } from '../../shared/contracts';
+import type { CapturedRequest, RunEvent, RunPhase, StepStatus } from '../../shared/contracts';
 import type { SanitizedMediaUrl } from '../../shared/contracts';
 import { createSanitizedCapturedUrl, redactEvidence, redactHeaders, redactUrlValue } from '../security/redact';
 
@@ -69,13 +69,18 @@ interface CapturedRequestRow {
   received_at: string;
 }
 
-export class EventRepository {
+export interface RunEventStore {
+  append(runId: string, input: RunEventInput): RunEvent;
+  persistCapturedRequest(request: SanitizedCapturedRequest): SanitizedCapturedRequest;
+  close(): void;
+}
+
+export class EventRepository implements RunEventStore {
   private readonly database: Database.Database;
 
   constructor(path: string) {
     this.database = new Database(path);
     this.database.exec(`
-      CREATE TABLE IF NOT EXISTS run_snapshots (run_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_events (
         id TEXT PRIMARY KEY,
         run_id TEXT NOT NULL,
@@ -205,21 +210,6 @@ export class EventRepository {
     return rows.map(toCapturedRequest);
   }
 
-  saveSnapshot(snapshot: WorkbenchSnapshot): void {
-    const safe = { ...snapshot, events: [], report: { status: 'unavailable', files: [] } };
-    this.database.prepare('INSERT INTO run_snapshots(run_id, snapshot) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET snapshot = excluded.snapshot').run(snapshot.runId, JSON.stringify(safe));
-  }
-  readSnapshot(runId: string): WorkbenchSnapshot | undefined {
-    const row = this.database.prepare('SELECT snapshot FROM run_snapshots WHERE run_id = ?').get(runId) as { snapshot: string } | undefined;
-    return row ? JSON.parse(row.snapshot) as WorkbenchSnapshot : undefined;
-  }
-  listHistory(): RunHistoryItem[] {
-    const rows = this.database.prepare('SELECT snapshot FROM run_snapshots ORDER BY rowid DESC LIMIT 200').all() as { snapshot: string }[];
-    return rows.map(row => { const s = JSON.parse(row.snapshot) as WorkbenchSnapshot; return { runId: s.runId, status: s.status, mode: s.mode, targetLabel: s.targetLabel, startedAt: s.startedAt, completedAt: s.completedAt }; });
-  }
-  interruptUnfinished(): void {
-    for (const item of this.listHistory()) if (!['completed', 'partial', 'cancelled', 'interrupted'].includes(item.status)) { const snapshot = this.readSnapshot(item.runId)!; snapshot.status = 'interrupted'; snapshot.completedAt = new Date().toISOString(); this.saveSnapshot(snapshot); }
-  }
   close(): void {
     this.database.close();
   }

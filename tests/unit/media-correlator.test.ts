@@ -64,6 +64,15 @@ function assertOwnedAndSelected(assets: MediaAsset[]): void {
 }
 
 describe('MediaCorrelator', () => {
+  it('pairs Douyin CDN tracks by video_id without merging prefetched unrelated videos', () => {
+    const assets = correlate([
+      response('https://v3.douyinvod.com/media-video-hvc1/?video_id=v123', 'video/mp4', 62409, 206),
+      response('https://v9.douyinvod.com/media-audio-und-mp4a/?video_id=v123', 'audio/mp4', 9478, 206),
+      response('https://v3.douyinvod.com/media-video-hvc1/?video_id=v456', 'video/mp4', 90000, 206)
+    ]);
+    expect(assets).toHaveLength(2);
+    expect(assets.find(a => a.tracks.length === 2)?.tracks.map(t => t.kind)).toEqual(['video', 'audio']);
+  });
   it('pairs a split video and audio stream using MIME, codec and MSE evidence', () => {
     const assets = correlate([
       response('https://cdn.test/media-video-hvc1/', 'video/mp4', 62_409_109, 206),

@@ -206,7 +206,7 @@ export function createMediaAdapter(options: MediaAdapterOptions = {}) {
       onProgress: progress => emit('remux', 'progress', 'running', { evidence: progress }) });
   }
   async function probePinned(file: PinnedFile, signal: AbortSignal, ownedPipe = false): Promise<MediaProbe> {
-    const args = ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm', '-count_packets', '-show_streams', '-show_format', '-show_data_hash', 'sha256', '-of', 'json', ownedPipe ? 'pipe:0' : inputArgument(file, 3)];
+    const args = ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm', ...(ownedPipe ? ['-analyzeduration', '30000000', '-probesize', '16777216'] : []), '-count_packets', '-show_streams', '-show_format', '-show_data_hash', 'sha256', '-of', 'json', ownedPipe ? 'pipe:0' : inputArgument(file, 3)];
     const safe = [...args.slice(0, -1), 'media-input'];
     const descriptors = process.platform === 'win32' || ownedPipe ? [] : [file.handle.fd];
     const input = ownedPipe ? { handle: file.handle, size: file.identity.size } : undefined;
@@ -261,7 +261,9 @@ export function createMediaAdapter(options: MediaAdapterOptions = {}) {
       temporary = join(directory, `.remux-${randomUUID()}.tmp`);
       output = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW), 0o600); outputIdentity = await output.stat();
       const outputArgument = 'pipe:1';
-      const args = ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm', '-i', inputArgument(video, 3), '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm', '-i', inputArgument(audio, 4), '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-map_metadata', '-1', '-map_chapters', '-1', '-progress', 'pipe:2', '-nostats', ...(videoProbe.container === 'mp4' ? ['-movflags', '+frag_keyframe+empty_moov+default_base_moof'] : []), '-f', videoProbe.container, outputArgument];
+      // Delay the initial moov until packet timestamps are known, so B-frame decode delay
+      // can be represented by edit lists without shifting video relative to audio.
+      const args = ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm', '-i', inputArgument(video, 3), '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm', '-i', inputArgument(audio, 4), '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-map_metadata', '-1', '-map_chapters', '-1', '-progress', 'pipe:2', '-nostats', ...(videoProbe.container === 'mp4' ? ['-movflags', '+frag_keyframe+delay_moov+default_base_moof'] : []), '-f', videoProbe.container, outputArgument];
       const safe = args.map(a => a === inputArgument(video, 3) ? 'video-input' : a === inputArgument(audio, 4) ? 'audio-input' : a);
       await run(getTools().ffmpeg, args, safe, signal, 'remux', process.platform === 'win32' ? [] : [video.handle.fd, audio.handle.fd], directory, output, undefined, Math.min(1024 ** 4, video.identity.size + audio.identity.size + 64 * 1024 * 1024));
       checkAbort(signal); await output.sync(); verifyDirectory();
@@ -274,7 +276,10 @@ export function createMediaAdapter(options: MediaAdapterOptions = {}) {
       if (resultProbe.container !== videoProbe.container || resultProbe.streams.length !== 2) failure('remux-verification-failed');
       for (let i = 0; i < 2; i++) {
         const { durationSeconds: inputDuration, ...inputParameters } = expected[i]; const { durationSeconds: outputDuration, ...outputParameters } = resultProbe.streams[i];
-        if (JSON.stringify(inputParameters) !== JSON.stringify(outputParameters) || Math.abs(inputDuration - outputDuration) > durationTolerance(inputDuration) || Math.abs(inputDuration - resultProbe.durationSeconds) > durationTolerance(inputDuration)) failure('remux-verification-failed');
+        if (JSON.stringify(inputParameters) !== JSON.stringify(outputParameters) || Math.abs(inputDuration - outputDuration) > durationTolerance(inputDuration) || Math.abs(inputDuration - resultProbe.durationSeconds) > durationTolerance(inputDuration)) {
+          emit('remux', 'verification', 'failed', { evidence: { expected, actual: resultProbe } });
+          failure('remux-verification-failed');
+        }
       }
       for (const file of [...files, finalFile]) await verifyPinned(file);
       // No await between the final cancellation check and no-clobber link: publication is the linearization point.

@@ -1,4 +1,5 @@
 /* Bundled filesystem actor. Mutations use relative basenames: verified OS cwd on POSIX, native directory handles on Windows. */
+const send = message => process.parentPort ? process.parentPort.postMessage(message) : process.send(message);
 let fs = require('node:fs/promises');
 let windows;
 const { constants } = require('node:fs');
@@ -110,8 +111,8 @@ async function execute(op, args) {
       await assertEntry('track.part', args.identity);
       if (cancelled) throw new Error('cancelled');
       // No await separates this final cancellation check from the atomic filesystem call.
-      if (windows) await fs.link('track.part', name, args.identity, () => process.send({ committed: true }));
-      else { await fs.link('track.part', name); process.send({ committed: true }); }
+      if (windows) await fs.link('track.part', name, args.identity, () => send({ committed: true }));
+      else { await fs.link('track.part', name); send({ committed: true }); }
       if (windows) await fs.flushEntry(name, args.identity);
       await syncDirectory();
       await assertEntry(name, args.identity);
@@ -132,11 +133,13 @@ async function execute(op, args) {
   }
 }
 let queue = Promise.resolve();
-process.on('message', message => {
+const receive = message => {
   if (message.cancel) { cancelled = true; return; }
   queue = queue.then(async () => {
-    try { const value = await execute(message.op, message.args ?? {}); process.send({ id: message.id, value }); }
-    catch (error) { process.send({ id: message.id, error: /^[a-z-]+$/.test(error.message) ? error.message : 'filesystem-operation-failed', code: error.code }); }
+    try { const value = await execute(message.op, message.args ?? {}); send({ id: message.id, value }); }
+    catch (error) { send({ id: message.id, error: /^[a-z-]+$/.test(error.message) ? error.message : 'filesystem-operation-failed', code: error.code }); }
   });
-});
+};
+if (process.parentPort) process.parentPort.on('message', event => receive(event.data));
+else process.on('message', receive);
 process.on('disconnect', () => { process.exit(0); });
