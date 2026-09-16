@@ -1,0 +1,89 @@
+{
+  "name": "media-security-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Authorized media access-control verification desktop lab",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && node scripts/copy-output-worker.cjs",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "package": "npm run build && electron-builder",
+    "build:windows-output": "node scripts/build-windows-output.cjs",
+    "test:windows-output": "vitest run --project integration tests/integration/windows-output.test.ts",
+    "build:windows-media-runner": "node scripts/build-windows-media-runner.cjs",
+    "test:windows-media": "vitest run --project integration tests/integration/media-process.test.ts tests/integration/windows-media-runner.test.ts tests/integration/ffmpeg-adapter.test.ts"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "better-sqlite3": "^12.4.1",
+    "fast-xml-parser": "^5.3.3",
+    "m3u8-parser": "^7.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@playwright/test": "^1.56.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "eslint": "^9.38.0",
+    "jsdom": "^27.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^4.0.6",
+    "node-gyp": "12.4.0"
+  },
+  "build": {
+    "appId": "com.medialab.security",
+    "productName": "Media Security Lab",
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "asarUnpack": [
+      "out/main/*.cjs",
+      "out/main/*.node",
+      "out/main/*.exe"
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+{"targets":[{"target_name":"windows_output","sources":["windows_output.cc"],"defines":["NAPI_VERSION=8","UNICODE","_UNICODE","WIN32_LEAN_AND_MEAN","NOMINMAX","_WIN32_WINNT=0x0A00"],"msvs_settings":{"VCCLCompilerTool":{"ExceptionHandling":1,"AdditionalOptions":["/std:c++17","/W4"]}}}]}
