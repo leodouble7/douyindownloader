@@ -60,6 +60,7 @@
   "build": {
     "appId": "com.lion.douyin.downloader",
     "productName": "抖音视频下载",
+    "afterPack": "./scripts/stage-media-tools.cjs",
     "files": [
       "out/**",
       "package.json"
