@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DouyinWorkIndex, DouyinWorkLink, resolveWorkId } from '../../src/main/douyin/target-work';
+import { DouyinWorkIndex, DouyinWorkLink, resolveWorkId, capturePageUrl } from '../../src/main/douyin/target-work';
 import { createSanitizedCapturedUrl } from '../../src/main/security/redact';
 import type { MediaAsset, MediaTrack } from '../../src/shared/contracts';
 import type { EphemeralRequest } from '../../src/main/runs/run-orchestrator';
@@ -24,6 +24,28 @@ function sources(urls = [video, audio, 'https://v26-web.douyinvod.com/other/medi
 function match(index: DouyinWorkIndex, input = sources()) { return index.select(page, page, input.assets, input.requests); }
 
 describe('Douyin work ownership', () => {
+  it('opens explicit search modal works through a direct work page without search parameters', () => {
+    for (const path of ['/root/search/%E8%B7%B3%E8%88%9E', '/search/跳舞']) {
+      expect(capturePageUrl(`https://www.douyin.com${path}?aid=search-session&modal_id=7355043530256977192&type=general`)).toBe('https://www.douyin.com/video/7355043530256977192');
+    }
+  });
+  it('does not rewrite ambiguous, malformed, foreign or unrelated links', () => {
+    for (const url of [
+      'https://www.douyin.com/root/search/跳舞',
+      'https://www.douyin.com/root/search/跳舞?modal_id=abc',
+      'https://www.douyin.com/root/search/跳舞?modal_id=123&modal_id=456',
+      'https://www.douyin.com/root/search/跳舞?modal_id=123&aweme_id=456',
+      'https://douyin.com.evil.test/root/search/跳舞?modal_id=123',
+      'https://www.douyin.com/video/123', 'https://v.douyin.com/abc/', page, 'not a URL'
+    ]) expect(capturePageUrl(url)).toBe(url);
+  });
+  it('keeps the exact target author for archive naming, never the recommended work author', () => {
+    const index = new DouyinWorkIndex();
+    index.ingest(JSON.stringify({ items: [{ ...work('999'), author: { nickname: '推荐作者' } }, { ...work(), author: { nickname: '目标作者' } }] }), 'json');
+    expect(match(index)).toMatchObject({ author: '目标作者', title: '师徒四人' });
+    index.ingest(JSON.stringify(work()), 'json');
+    expect(match(index).author).toBe('目标作者');
+  });
   it('uses exact string IDs, original link before redirected selection, and only Douyin hosts', () => {
     expect(resolveWorkId(page, 'https://www.douyin.com/video/999')).toBe(workId);
     expect(resolveWorkId('https://v.douyin.com/abc/', `https://www.douyin.com/video/${workId}`)).toBe(workId);

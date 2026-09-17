@@ -9,6 +9,9 @@ const downloader: DesktopDownloaderApi = {
   retry: input => ipcRenderer.invoke('downloader:retry', input),
   cancel: input => ipcRenderer.invoke('downloader:cancel', input),
   reveal: input => ipcRenderer.invoke('downloader:reveal', input),
+  continueDownload: input => ipcRenderer.invoke('downloader:continue-download', input),
+  getHistory: input => ipcRenderer.invoke('downloader:get-history', input),
+  revealHistory: input => ipcRenderer.invoke('downloader:reveal-history', input),
   onState: listener => {
     const callback = (_event: Electron.IpcRendererEvent, state: DownloadSnapshot) => listener(state);
     ipcRenderer.on('downloader:state', callback);

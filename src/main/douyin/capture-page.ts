@@ -9,7 +9,7 @@ import type { EphemeralRequest } from '../runs/run-orchestrator';
 export interface CaptureInput { pageUrl: string; observeSeconds: number; show?: boolean }
 export interface CaptureResult {
   runId: string; assets: MediaAsset[]; requests: EphemeralRequest[]; target?: WorkTarget;
-  summary: { network: number; mse: number; title: string; excerpt: string; videoElements: number };
+  summary: { network: number; mse: number; title: string; author?: string; excerpt: string; videoElements: number };
 }
 export async function capturePage(input: CaptureInput, signal: AbortSignal): Promise<CaptureResult> {
   signal.throwIfAborted();

@@ -17,6 +17,9 @@ async function installBridge(page: Page) {
       start: async () => testWindow.emitFixture({ id: 'fixture', phase: 'parsing', title: '测试作品', message: '正在解析视频' }),
       select: async input => { testWindow.selected = input; testWindow.emitFixture({ phase: 'downloading', candidates: [], message: '正在下载文件' }); },
       retry: async input => { testWindow.retried = input; },
+      continueDownload: async () => testWindow.emitFixture({ phase: 'parsing', duplicate: undefined }),
+      getHistory: async () => ({ items: [], total: 0, offset: 0, limit: 20 }),
+      revealHistory: async () => undefined,
       cancel: async () => testWindow.emitFixture({ phase: 'cancelled', message: '任务已取消' }),
       reveal: async input => { testWindow.revealed = input.taskId ? state.queue?.find(item => item.id === input.taskId)?.outputPath : state.outputPath; },
       onState: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }
@@ -26,6 +29,35 @@ async function installBridge(page: Page) {
 async function emit(page: Page, patch: Partial<DownloadSnapshot>) {
   await page.evaluate(value => (window as unknown as { emitFixture: (p: Partial<DownloadSnapshot>) => void }).emitFixture(value), patch);
 }
+
+test('history and duplicate choices work with keyboard and narrow layouts', async ({ page }, testInfo) => {
+  await installBridge(page); await page.goto('/');
+  await expect(page.getByRole('button', { name: '开始下载' })).toBeEnabled();
+  const item = { id: 'saved', workId: '7684438409082866998', author: '旅行记录', title: '山间日出与云海', outputPath: 'D:/视频收藏/旅行记录_山间日出与云海_7684438409082866998.mp4', directory: 'D:/视频收藏', completedAt: '2026-09-17T00:00:00Z', available: true };
+  await page.evaluate(record => {
+    window.downloader.getHistory = async ({ offset }) => ({ items: offset ? [{ ...record, id: 'missing', available: false }] : [record], total: 21, offset, limit: 20 });
+    window.downloader.revealHistory = async ({ id }) => { (window as unknown as { revealed: string }).revealed = id; };
+  }, item);
+  await emit(page, { id: 'duplicate', phase: 'duplicate', duplicate: item, targetWorkId: item.workId, title: item.title });
+  await expect(page.getByRole('heading', { name: '这个作品已下载过' })).toBeVisible();
+  await page.getByRole('button', { name: '打开已有文件位置' }).click();
+  expect(await page.evaluate(() => (window as unknown as { revealed: string }).revealed)).toBe('saved');
+  const toggle = page.getByRole('button', { name: '下载历史' });
+  await toggle.focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('navigation', { name: '下载历史分页' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('duplicate-history.png'), fullPage: true });
+  await page.getByRole('button', { name: '下一页' }).click();
+  await expect(page.getByText(/文件已移动或删除/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '打开文件夹', exact: true })).toBeDisabled();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('history-narrow.png'), fullPage: true });
+  await page.getByRole('button', { name: '仍然下载' }).focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: '正在准备下载' })).toBeVisible();
+  await emit(page, { phase: 'duplicate', duplicate: item });
+  await page.getByRole('button', { name: '暂不下载' }).click();
+  await expect(page.getByRole('button', { name: '开始下载' })).toBeEnabled();
+});
 
 test('desktop workflow: native-choice result, real progress display, recovery and result', async ({ page }, testInfo) => {
   await installBridge(page); await page.goto('/');
@@ -197,7 +229,7 @@ test('background capture failure offers a manual page only after a user click', 
   await installBridge(page); await page.goto('/');
   await page.getByRole('textbox', { name: '视频链接' }).fill('https://www.douyin.com/video/7684438409082866998');
   await page.getByRole('button', { name: '开始下载' }).click();
-  await expect(page.getByText('正在后台读取视频，通常需要约 30 秒。')).toBeVisible();
+  await expect(page.getByText('正在后台读取视频，资源齐全后会自动开始下载。')).toBeVisible();
   await emit(page, { phase: 'failed', message: '暂时无法自动获取视频。网页可能需要登录、验证或手动播放。', captureFallback: true });
   await expect(page.getByRole('button', { name: '打开抖音网页重试' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: '视频链接' })).toBeVisible();

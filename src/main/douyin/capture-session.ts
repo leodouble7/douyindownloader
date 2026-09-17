@@ -1,17 +1,18 @@
 import { app, BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { setTimeout as wait } from 'node:timers/promises';
 import { CdpCapture } from '../browser/cdp-capture';
 import { ElectronDebuggerPort } from '../browser/debugger-port';
 import { MediaCorrelator } from '../media/media-correlator';
 import type { MediaAsset } from '../../shared/contracts';
 import type { EphemeralRequest } from '../runs/run-orchestrator';
 import type { CaptureInput, CaptureResult } from './capture-page';
-import { DouyinWorkIndex, DouyinWorkLink, isDouyinUrl, resolveWorkId } from './target-work';
+import { DouyinWorkIndex, DouyinWorkLink, isDouyinUrl, resolveWorkId, capturePageUrl } from './target-work';
 import { observeDouyinWork } from './work-observer';
+import { completedMedia, targetReadinessKey, waitForCapture } from './capture-readiness';
 
 /** Runs inside the current Electron app. Never quits its host process. */
 export async function captureSession(input: CaptureInput, externalSignal: AbortSignal): Promise<CaptureResult> {
+  input = { ...input, pageUrl: capturePageUrl(input.pageUrl) };
   const localController = new AbortController();
   const signal = AbortSignal.any([externalSignal, localController.signal]);
   let window: BrowserWindow | undefined, capture: CdpCapture | undefined;
@@ -59,7 +60,11 @@ export async function captureSession(input: CaptureInput, externalSignal: AbortS
       observe: observation => {
         if (observation.kind === 'network') {
           network++;
-          if (observation.stage === 'finished') completed.add(observation.request.id);
+          if (observation.stage === 'finished') {
+            const status = observation.request.status;
+            if (status !== undefined && status >= 200 && status < 300) completed.add(observation.request.id);
+            else completed.delete(observation.request.id);
+          }
           if (observation.stage === 'failed') completed.delete(observation.request.id);
         }
         if (observation.kind === 'mse') mse++;
@@ -69,7 +74,12 @@ export async function captureSession(input: CaptureInput, externalSignal: AbortS
     await remoteOperation(() => capture!.start({ targetId: String(contents.id), type: 'page', url: input.pageUrl }), signal);
     if (background) await remoteOperation(() => contents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: backgroundPlayback(input.observeSeconds) }), signal);
     await remoteOperation(() => contents.loadURL(input.pageUrl), signal, 30000);
-    await wait(input.observeSeconds * 1000, undefined, { signal });
+    // Metadata bodies settle asynchronously; polling observes ingestion without calling the
+    // observer's terminal flush (which unsubscribes and would miss later work metadata).
+    await waitForCapture(input.observeSeconds * 1000, signal, workIndex ? () => {
+      workLink.observe(contents.getURL());
+      return targetReadinessKey(workIndex, input.pageUrl, workLink.resolvedUrl, assets, requests, completed);
+    } : undefined);
     await remoteOperation(() => capture!.flush(), signal);
     const page = await remoteOperation(() => contents.executeJavaScript(`({title: document.title, excerpt: (document.body?.innerText || '').slice(0, 800), videoElements: document.querySelectorAll('video').length})`), signal) as Pick<CaptureResult['summary'], 'title' | 'excerpt' | 'videoElements'>;
     if (workObserver) await remoteOperation(() => workObserver!.flush(), signal, 6000);
@@ -77,15 +87,11 @@ export async function captureSession(input: CaptureInput, externalSignal: AbortS
     await remoteOperation(() => capture!.stop(), signal); capture = undefined;
     // A later in-flight Range does not invalidate an earlier completed request of the same representation.
     // Only completed immutable source references are handed to the download process.
-    for (const asset of assets) for (const track of asset.tracks) {
-      track.sourceRequestIds = track.sourceRequestIds.filter(id => completed.has(id) && requests.has(id));
-      track.eligible = track.sourceRequestIds.length > 0;
-      track.incomplete = !track.eligible;
-    }
-    const ids = new Set(assets.flatMap(a => a.tracks.flatMap(t => t.sourceRequestIds)));
-    const retained = [...requests.values()].filter(r => ids.has(r.id));
+    const snapshot = completedMedia(assets, requests, completed);
+    assets = snapshot.assets;
+    const retained = snapshot.requests;
     const target = workIndex?.select(input.pageUrl, workLink.resolvedUrl, assets, retained);
-    return { runId, assets: target?.assets ?? assets, requests: target?.requests ?? retained, ...(target ? { target: target.target } : {}), summary: { network, mse, ...page, title: target?.title ?? page.title } };
+    return { runId, assets: target?.assets ?? assets, requests: target?.requests ?? retained, ...(target ? { target: target.target } : {}), summary: { network, mse, ...page, title: target?.title ?? page.title, author: target?.author } };
   } catch {
     if (signal.aborted) throw new DOMException('页面捕获已取消或浏览器已关闭', 'AbortError');
     throw new Error('页面加载或捕获失败，请检查网络后重试。');

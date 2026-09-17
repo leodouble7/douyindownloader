@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createReadStream, type ReadStream } from 'node:fs';
 import { link, mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { DownloadOptions, DownloadResult } from '../../src/main/douyin/download';
 import { saveDesktopDownload } from '../../src/main/desktop/save-download';
@@ -31,11 +31,20 @@ it('publishes a visible finished file directly in the selected directory and cle
   const directory = await destination(); const download = fakeDownload('finished-video');
   const result = await saveDesktopDownload({ outputDirectory: directory }, new AbortController().signal, download);
   expect(dirname(result.outputPath!)).toBe(await realpath(directory));
-  expect(await readdir(directory)).toEqual([result.outputPath!.split('/').pop()]);
-  expect(result.outputPath!.split('/').pop()).not.toMatch(/^\./);
+  expect(await readdir(directory)).toEqual([basename(result.outputPath!)]);
+  expect(basename(result.outputPath!)).not.toMatch(/^\./);
   expect(await readFile(result.outputPath!, 'utf8')).toBe('finished-video');
   expect(result.reportPath).toBeUndefined();
   await expect(readdir(download.mock.calls[0][0].outputDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+it('uses work metadata for readable archive names and never overwrites another quality', async () => {
+  const directory = await destination();
+  const options = { outputDirectory: directory, archive: { author: '作者', title: '旅行', workId: '123456789' } };
+  const first = await saveDesktopDownload(options, new AbortController().signal, fakeDownload('first'));
+  const second = await saveDesktopDownload(options, new AbortController().signal, fakeDownload('second'));
+  expect(basename(first.outputPath!)).toBe('作者_旅行_123456789.mp4');
+  expect(basename(second.outputPath!)).toBe('作者_旅行_123456789 (2).mp4');
+  expect(await readFile(first.outputPath!, 'utf8')).toBe('first');
 });
 it('uses numbered names without overwriting existing files or simultaneous downloads', async () => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-16T04:00:00Z'));

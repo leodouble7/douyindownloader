@@ -3,6 +3,7 @@ import { isDownloadActive, type DesktopDownloaderApi, type DownloadSnapshot } fr
 import { Icon } from './components/Icon';
 import { DownloadTask } from './components/DownloadTask';
 import { FailureMessage } from './components/FailureMessage';
+import { DownloadHistory } from './components/DownloadHistory';
 
 const initial: DownloadSnapshot = { sequence: -1, phase: 'idle', directory: '', message: '', candidates: [], tracks: [] };
 
@@ -82,11 +83,16 @@ export function App({ api = window.downloader }: { api?: DesktopDownloaderApi })
         {!busy && !!state.queue?.some(item => item.canRetry) && <p className="inline-note">开始新下载后，无法重试这次的失败项；已保存文件会保留。</p>}
       </form>
       {!ready && !error && <p className="connection-status" role="status">正在连接…</p>}
+      {state.historyWarning && <p className="history-warning" role="status">{state.historyWarning}</p>}
       {state.phase !== 'idle' && <DownloadTask state={state} pending={pending}
+        onContinue={() => void action(() => api!.continueDownload({ jobId: state.id! }))}
+        onRevealDuplicate={() => void action(() => api!.revealHistory({ id: state.duplicate!.id }))}
+        onSkipDuplicate={() => void action(() => api!.cancel({ jobId: state.id! }))}
         onSelect={(mode, selections) => void action(() => api!.select({ jobId: state.id!, mode, selections }))}
         onRetry={taskId => void action(() => api!.retry({ jobId: state.id!, taskId }))}
         onReveal={taskId => void action(() => api!.reveal({ jobId: state.id!, ...(taskId ? { taskId } : {}) }))}
         onManualCapture={() => startDownload(true)} />}
+      {ready && api && <DownloadHistory api={api} revision={`${state.id ?? ''}:${state.phase}`} disabled={pending} onReveal={id => void action(() => api.revealHistory({ id }))} />}
     </main>
   </div>;
 }

@@ -12,9 +12,11 @@ import type { NetworkPolicy } from '../probes/address-policy';
 import { createMediaAdapter, resolveMediaTools, type MediaProbe } from '../media/ffmpeg-adapter';
 import { createSanitizedCapturedUrl, redactText } from '../security/redact';
 import { httpUrl } from './options';
+import type { DownloadArchiveMetadata } from '../../shared/desktop';
 
 export interface CapturedSelection { runId: string; tracks: MediaTrack[]; requests: EphemeralRequest[] }
 export interface DownloadOptions {
+  archive?: DownloadArchiveMetadata;
   outputDirectory: string; videoUrl?: string; audioUrl?: string; referer?: string; userAgent?: string;
   maxBytes?: number; captured?: CapturedSelection; networkPolicy?: NetworkPolicy;
   onEvent?: (event: RunEvent) => void;

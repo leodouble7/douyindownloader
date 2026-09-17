@@ -5,6 +5,7 @@ import { App } from '../../src/renderer/App';
 import type { DesktopDownloaderApi, DownloadSnapshot } from '../../src/shared/desktop';
 
 afterEach(cleanup);
+const archived = { id: 'saved-1', workId: '7684438409082866998', author: '测试作者', title: '已存作品', outputPath: '/tmp/videos/作者_作品_7684438409082866998.mp4', directory: '/tmp/videos', completedAt: '2026-09-17T02:00:00Z', available: true };
 const idle: DownloadSnapshot = { sequence: 0, phase: 'idle', directory: '/tmp/videos', message: '', candidates: [], tracks: [] };
 const url = 'https://www.douyin.com/jingxuan?modal_id=7684438409082866998';
 function setup(initial = idle) {
@@ -13,11 +14,49 @@ function setup(initial = idle) {
     getState: vi.fn().mockResolvedValue(initial), chooseDirectory: vi.fn().mockResolvedValue('/tmp/selected'),
     start: vi.fn().mockResolvedValue(undefined), select: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined), reveal: vi.fn().mockResolvedValue(undefined), retry: vi.fn().mockResolvedValue(undefined),
+    continueDownload: vi.fn().mockResolvedValue(undefined), revealHistory: vi.fn().mockResolvedValue(undefined),
+    getHistory: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 20 }),
     onState: callback => { listener = callback; return () => { listener = undefined; }; }
-  };
+};
   render(<App api={api} />);
   return { api, emit: (state: DownloadSnapshot) => act(() => listener?.(state)) };
 }
+
+it('keeps a duplicate paused, reveals the saved file by ID and continues only after explicit choice', async () => {
+  const { api } = setup({ ...idle, id: 'duplicate-job', phase: 'duplicate', duplicate: archived });
+  await screen.findByRole('heading', { name: '这个作品已下载过' });
+  expect(api.start).not.toHaveBeenCalled(); expect(api.continueDownload).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '打开已有文件位置' }));
+  await waitFor(() => expect(api.revealHistory).toHaveBeenCalledWith({ id: 'saved-1' }));
+  fireEvent.click(screen.getByRole('button', { name: '仍然下载' }));
+  await waitFor(() => expect(api.continueDownload).toHaveBeenCalledWith({ jobId: 'duplicate-job' }));
+});
+
+it('loads persistent history, marks missing files, and paginates instead of an unbounded list', async () => {
+  const { api } = setup();
+  vi.mocked(api.getHistory).mockResolvedValue({ items: [archived, { ...archived, id: 'missing', title: '已移走作品', available: false }], total: 22, offset: 0, limit: 20 });
+  await screen.findByDisplayValue('/tmp/videos');
+  fireEvent.click(screen.getByRole('button', { name: '下载历史' }));
+  await screen.findByText('已存作品');
+  expect(screen.getByText(/文件已移动或删除/)).toBeVisible();
+  const missing = screen.getByText('已移走作品').closest('li')!;
+  expect(within(missing).getByRole('button', { name: '打开文件夹' })).toBeDisabled();
+  vi.mocked(api.getHistory).mockResolvedValue({ items: [{ ...archived, id: 'page2', title: '第二页作品' }], total: 22, offset: 20, limit: 20 });
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  await screen.findByText('第二页作品');
+  expect(api.getHistory).toHaveBeenLastCalledWith({ offset: 20 });
+  expect(screen.queryByText('已存作品')).not.toBeInTheDocument();
+});
+
+it('shows a retry action when history cannot be read', async () => {
+  const { api } = setup();
+  vi.mocked(api.getHistory).mockRejectedValueOnce(new Error('无法读取下载历史'));
+  await screen.findByDisplayValue('/tmp/videos');
+  fireEvent.click(screen.getByRole('button', { name: '下载历史' }));
+  await screen.findByText('无法读取下载历史，请重试。');
+  fireEvent.click(screen.getByRole('button', { name: '重试加载历史' }));
+  await screen.findByText('还没有下载记录。成功保存的作品会显示在这里。');
+});
 
 it('validates a link, chooses the native directory and starts one job', async () => {
   const { api, emit } = setup();
@@ -275,7 +314,7 @@ it('opens the manual web retry only from an explicit fallback action', async () 
   const { emit, api } = setup(); await screen.findByDisplayValue('/tmp/videos');
   fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), { target: { value: url } });
   emit({ ...idle, id: 'j', phase: 'parsing', sequence: 1, captureMode: 'background' });
-  expect(screen.getByText('正在后台读取视频，通常需要约 30 秒。')).toBeVisible();
+  expect(screen.getByText('正在后台读取视频，资源齐全后会自动开始下载。')).toBeVisible();
   expect(screen.queryByRole('button', { name: '打开抖音网页重试' })).not.toBeInTheDocument();
   emit({ ...idle, id: 'j', phase: 'failed', sequence: 2, captureFallback: true, message: '暂时无法自动获取视频' });
   fireEvent.click(screen.getByRole('button', { name: '打开抖音网页重试' }));

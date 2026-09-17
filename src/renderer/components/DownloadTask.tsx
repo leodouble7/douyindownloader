@@ -6,11 +6,18 @@ import { DownloadProgress } from './DownloadProgress';
 import { TaskContext } from './TaskContext';
 import { FailureMessage } from './FailureMessage';
 
-export function DownloadTask({ state, pending, onSelect, onRetry, onReveal, onManualCapture }: {
+export function DownloadTask({ state, pending, onSelect, onRetry, onReveal, onManualCapture, onContinue, onRevealDuplicate, onSkipDuplicate }: {
   state: DownloadSnapshot; pending: boolean;
   onSelect: (mode: DownloadMode, selections: DownloadSelection[]) => void; onRetry: (taskId: string) => void;
   onReveal: (taskId?: string) => void; onManualCapture: () => void;
+  onContinue: () => void; onRevealDuplicate: () => void; onSkipDuplicate: () => void;
 }) {
+  if (state.phase === 'duplicate' && state.duplicate) return <section className="current-download" aria-label="当前下载">
+    <div className="download-heading"><h2>这个作品已下载过</h2></div>
+    <div className="panel duplicate-notice"><p className="target-work-title">{state.duplicate.title}</p><p>{state.duplicate.author} · 作品 {state.duplicate.workId}</p><p className="history-path">{state.duplicate.outputPath}</p><p className="inline-note" role="status">原文件仍在。仍然下载会另存一份，不会覆盖原文件。</p>
+      <div className="duplicate-actions"><button type="button" className="button primary" disabled={pending} onClick={onRevealDuplicate}>打开已有文件位置</button><button type="button" className="button" disabled={pending} onClick={onSkipDuplicate}>暂不下载</button><button type="button" className="button link" disabled={pending} onClick={onContinue}>仍然下载</button></div>
+    </div>
+  </section>;
   const choosing = state.phase === 'choosing', parsing = state.phase === 'parsing';
   const working = ['downloading', 'merging', 'verifying'].includes(state.phase);
   const hasQueue = !!state.queue?.length, failed = state.phase === 'failed';
@@ -29,7 +36,7 @@ export function DownloadTask({ state, pending, onSelect, onRetry, onReveal, onMa
     {choosing ? <MediaSelection key={state.id} targetTitle={state.targetWorkId ? state.title || '抖音作品' : undefined} candidates={state.candidates} pending={pending} onSubmit={onSelect} /> : <>
       {expired && <p className="expiry-banner">下载信息已过期，请用上方链接重新开始。已保存文件可以正常打开。</p>}
       {hasQueue ? <DownloadQueue items={state.queue!} pending={pending} active={working} onRetry={onRetry} onReveal={onReveal} /> : parsing || recovery ? <section className="panel inline-download-state" aria-label="下载状态">
-        {parsing ? <p className="processing-note" role="status"><span className="spinner" aria-hidden="true" />{state.captureMode === 'interactive' ? '请在打开的抖音网页中播放要下载的视频。' : '正在后台读取视频，通常需要约 30 秒。'}</p> : failed ? <FailureMessage message={state.message} alert /> : <p role="status">{state.message || '下载已取消，可以修改上方链接后重新开始。'}</p>}
+        {parsing ? <p className="processing-note" role="status"><span className="spinner" aria-hidden="true" />{state.captureMode === 'interactive' ? '请在打开的抖音网页中播放要下载的视频。' : '正在后台读取视频，资源齐全后会自动开始下载。'}</p> : failed ? <FailureMessage message={state.message} alert /> : <p role="status">{state.message || '下载已取消，可以修改上方链接后重新开始。'}</p>}
         {failed && state.captureFallback && <div className="capture-fallback"><p>如果需要登录、验证或手动播放，可以打开网页操作。</p><button type="button" className="button" disabled={pending} onClick={onManualCapture}>打开抖音网页重试</button></div>}
       </section> : <section className="panel standalone-task">
         {working ? state.phase === 'downloading' ? <DownloadProgress tracks={state.tracks} /> : <p className="processing-note" role="status"><span className="spinner" aria-hidden="true" />正在保存，请稍候…</p> : <><p className="result-path">{state.outputPath || state.reportPath}</p><button className="button primary" type="button" onClick={() => onReveal()} disabled={pending || !(state.outputPath || state.reportPath)}><Icon name="folder" size={18} />打开文件夹</button></>}

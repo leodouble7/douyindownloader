@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 import { DownloadService, type DownloadServiceDependencies } from '../../src/main/desktop/download-service';
 import type { CaptureResult } from '../../src/main/douyin/capture-page';
 import type { DownloadOptions, DownloadResult } from '../../src/main/douyin/download';
@@ -25,6 +26,44 @@ const start = (service: DownloadService) => service.start({ url: '复制分享 h
 const phase = async (service: DownloadService, value: DownloadSnapshot['phase']) => { await expect.poll(() => service.getState().phase).toBe(value); };
 
 describe('desktop download lifecycle', () => {
+  it('prompts for an existing work before capture, and resumes only on explicit confirmation', async () => {
+    const workId = '7684438409082866998';
+    const record = { id: 'saved', workId, author: '作者', title: '作品', outputPath: '/downloads/saved.mp4', directory: '/downloads', completedAt: '2026-09-17T00:00:00Z', available: true };
+    const capture = vi.fn(async () => ({ ...captured(), target: { status: 'matched' as const, workId } }));
+    const download = vi.fn(async () => result);
+    const history = { find: async () => record, record: vi.fn(async () => undefined), get: async () => record, list: async () => ({ items: [record], total: 1, offset: 0, limit: 20 }) };
+    const { service } = harness({ capture, download, history });
+    await service.start({ url: `https://www.douyin.com/video/${workId}`, directory: '/downloads' });
+    await phase(service, 'duplicate');
+    expect(service.getState().duplicate?.id).toBe('saved');
+    expect(capture).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();
+    await service.continueDownload({ jobId: service.getState().id! });
+    await phase(service, 'completed'); expect(download).toHaveBeenCalledTimes(1);
+  });
+  it('checks short-link duplicates after capture and cancels without downloading', async () => {
+    const workId = '7684438409082866998';
+    const record = { id: 'saved', workId, author: '作者', title: '作品', outputPath: '/downloads/saved.mp4', directory: '/downloads', completedAt: '2026-09-17T00:00:00Z', available: true };
+    const download = vi.fn(async () => result);
+    const { service } = harness({ capture: async () => ({ ...captured(), target: { status: 'matched', workId } }), download,
+      history: { find: async () => record, record: async () => undefined, get: async () => record, list: async () => ({ items: [record], total: 1, offset: 0, limit: 20 }) } });
+    await start(service); await phase(service, 'duplicate');
+    await service.cancel({ jobId: service.getState().id! });
+    expect(service.getState().phase).toBe('cancelled'); expect(download).not.toHaveBeenCalled();
+    await expect(service.continueDownload({ jobId: service.getState().id! })).rejects.toThrow();
+  });
+  it('passes sanitized archive metadata and keeps a saved download successful when history storage fails', async () => {
+    const download = vi.fn<DownloadServiceDependencies['download']>(async () => result);
+    const saved = vi.fn(async () => { throw new Error('disk full'); });
+    const workId = '7684438409082866998';
+    const data = captured(); data.summary.author = '作者 Cookie: private-cookie';
+    data.target = { status: 'matched', workId };
+    const { service } = harness({ capture: async () => data, download,
+      history: { find: async () => undefined, record: saved, get: async () => undefined, list: async () => ({ items: [], total: 0, offset: 0, limit: 20 }) } });
+    await start(service); await phase(service, 'completed');
+    expect(download.mock.calls[0][0].archive).toMatchObject({ workId });
+    expect(JSON.stringify(download.mock.calls[0][0].archive)).not.toMatch(/private-cookie|title-secret/);
+    expect(saved).toHaveBeenCalledOnce(); expect(service.getState().historyWarning).toContain('历史');
+  });
   it('captures in the background by default and opens a page only when explicitly requested', async () => {
     const capture = vi.fn<DownloadServiceDependencies['capture']>(async () => captured());
     const { service } = harness({ capture });
@@ -122,9 +161,9 @@ describe('desktop download lifecycle', () => {
     const opened: string[][] = [];
     const { service } = harness({ chooseDirectory: async () => '/next-downloads', reveal: async (path, directory) => { opened.push([path, directory]); } });
     await start(service); await phase(service, 'completed'); const jobId = service.getState().id!;
-    await service.chooseDirectory(); expect(service.getState().directory).toBe('/next-downloads');
-    expect(service.getState().resultDirectory).toBe('/downloads');
-    await service.reveal({ jobId }); expect(opened).toEqual([['/downloads/douyin-job/video.mp4', '/downloads']]);
+    await service.chooseDirectory(); expect(service.getState().directory).toBe(resolve('/next-downloads'));
+    expect(service.getState().resultDirectory).toBe(resolve('/downloads'));
+    await service.reveal({ jobId }); expect(opened).toEqual([['/downloads/douyin-job/video.mp4', resolve('/downloads')]]);
   });
   it('rejects non-Douyin page inputs and empty directories before capture', async () => {
     const { service } = harness();
@@ -133,7 +172,7 @@ describe('desktop download lifecycle', () => {
   });
   it('keeps a selected directory usable when persistence fails and surfaces a safe notice', async () => {
     const { service } = harness({ saveDirectory: async () => { throw new Error('permission-secret'); } });
-    expect(await service.chooseDirectory()).toBe('/downloads'); expect(service.getState().directory).toBe('/downloads'); expect(service.getState().message).toMatch(/保存/); expect(service.getState().message).not.toContain('permission-secret');
+    expect(await service.chooseDirectory()).toBe(resolve('/downloads')); expect(service.getState().directory).toBe(resolve('/downloads')); expect(service.getState().message).toMatch(/保存/); expect(service.getState().message).not.toContain('permission-secret');
   });
 });
 
@@ -210,7 +249,7 @@ describe('desktop independent download queue', () => {
     await start(service); await phase(service, 'choosing'); await selectBatch(service); await phase(service, 'completed');
     const state = service.getState(); await service.chooseDirectory();
     await service.reveal({ jobId: state.id!, taskId: state.queue![2].id });
-    expect(opened).toEqual([['/downloads/three-0/video.mp4', '/downloads']]);
+    expect(opened).toEqual([['/downloads/three-0/video.mp4', resolve('/downloads')]]);
     await expect(service.reveal({ jobId: state.id!, taskId: 'foreign' })).rejects.toThrow();
     await expect(service.reveal({ jobId: 'stale', taskId: state.queue![2].id })).rejects.toThrow();
   });

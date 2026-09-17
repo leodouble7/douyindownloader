@@ -7,10 +7,12 @@ import { DownloadService } from './download-service';
 import { MemoryEventRepository } from './memory-event-repository';
 import { electronOutputWorkerLauncher } from './output-worker';
 import { DirectoryPreferences, validateDirectory, validateRevealPath } from './preferences';
+import { DownloadHistory } from './download-history';
 
 export function createDesktopService(getWindow: () => BrowserWindow | undefined): DownloadService {
   const preferences = new DirectoryPreferences(join(app.getPath('userData'), 'downloader-preferences.json'));
   return new DownloadService({
+    history: new DownloadHistory(join(app.getPath('userData'), 'download-history.json')),
     capture: captureSession,
     download: (options, signal) => saveDesktopDownload({ ...options, createEventRepository: () => new MemoryEventRepository(), outputWorkerLauncher: electronOutputWorkerLauncher, outputWorkerModulePath: fileURLToPath(new URL('./output-worker.cjs', import.meta.url)) }, signal),
     chooseDirectory: async current => {

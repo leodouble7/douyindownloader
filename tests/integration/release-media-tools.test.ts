@@ -41,7 +41,8 @@ it('puts executable arm64 media tools beside the packaged macOS app', async () =
   const directory = join(output, '抖音视频下载.app', 'Contents', 'Resources', 'media-tools', 'darwin-arm64');
   expect(await readFile(join(directory, 'ffmpeg'), 'utf8')).toBe('ffmpeg-darwin-arm64');
   expect(await readFile(join(directory, 'ffprobe'), 'utf8')).toBe('ffprobe-darwin-arm64');
-  expect((await stat(join(directory, 'ffmpeg'))).mode & 0o111).not.toBe(0);
+  // Windows does not expose POSIX executable bits for extensionless files.
+  if (process.platform !== 'win32') expect((await stat(join(directory, 'ffmpeg'))).mode & 0o111).not.toBe(0);
 });
 
 it('puts Windows x64 tools in the resources directory', async () => {

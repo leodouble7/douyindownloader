@@ -6,7 +6,7 @@ interface Representation {
   key: string; urls: string[]; kind: 'video' | 'audio' | 'muxed'; fileId?: string; audioFileId?: string;
   width?: number; height?: number; bitrate?: number; durationSeconds?: number;
 }
-interface Work { title: string; representations: Representation[] }
+interface Work { title: string; author?: string; representations: Representation[] }
 type RecordValue = Record<string, unknown>;
 const MAX_BODY = 8_000_000;
 const record = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {};
@@ -31,6 +31,17 @@ export function resolveWorkId(original: string, final?: string): string | undefi
   }
   return final ? urlWorkId(final) : urlWorkId(original);
 }
+/** Resolve an explicit search selection to its public work page before navigation. */
+export function capturePageUrl(value: string): string {
+  if (!isDouyinUrl(value)) return value;
+  const url = new URL(value), workId = resolveWorkId(value);
+  // Search pages may require login even when the selected work is publicly playable.
+  if (workId && url.searchParams.has('modal_id') && /^\/(?:root\/)?search(?:\/|$)/.test(url.pathname)) {
+    return `https://www.douyin.com/video/${workId}`;
+  }
+  return value;
+}
+
 /** Keep the first real work reached from a short link, even if the player navigates later. */
 export class DouyinWorkLink {
   resolvedUrl: string;
@@ -123,14 +134,14 @@ export class DouyinWorkIndex {
         if (reps.length) {
           const merged = new Map(previous?.representations.map(rep => [JSON.stringify([rep.key, rep.audioFileId, rep.urls]), rep]));
           for (const rep of reps) if (merged.size < 256) merged.set(JSON.stringify([rep.key, rep.audioFileId, rep.urls]), rep);
-          this.works.set(workId, { title: text(item.desc) ?? text(item.itemTitle) ?? previous?.title ?? '抖音作品', representations: [...merged.values()] });
+          this.works.set(workId, { title: text(item.desc) ?? text(item.itemTitle) ?? previous?.title ?? '抖音作品', author: text(record(item.author).nickname) ?? previous?.author, representations: [...merged.values()] });
         }
       }
       for (const nested of Object.values(value)) walk(nested, depth + 1);
     };
     walk(value, 0);
   }
-  select(original: string, final: string, assets: MediaAsset[], requests: EphemeralRequest[]): { assets: MediaAsset[]; requests: EphemeralRequest[]; target: WorkTarget; title?: string } {
+  select(original: string, final: string, assets: MediaAsset[], requests: EphemeralRequest[]): { assets: MediaAsset[]; requests: EphemeralRequest[]; target: WorkTarget; title?: string; author?: string } {
     const workId = resolveWorkId(original, final), work = workId ? this.works.get(workId) : undefined;
     const empty = { assets: [], requests: [], target: { workId, status: 'unresolved' as const } };
     if (!work || !workId) return empty;
@@ -169,6 +180,6 @@ export class DouyinWorkIndex {
     if (!result.length) return { ...empty, title: work.title };
     result.sort((a, b) => (b.tracks[0].height ?? 0) - (a.tracks[0].height ?? 0) || (b.tracks[0].bitrate ?? 0) - (a.tracks[0].bitrate ?? 0));
     const ids = new Set(result.flatMap(asset => asset.sourceRequestIds));
-    return { assets: result, requests: requests.filter(request => ids.has(request.id)), target: { workId, status: 'matched' }, title: work.title };
+    return { assets: result, requests: requests.filter(request => ids.has(request.id)), target: { workId, status: 'matched' }, title: work.title, author: work.author };
   }
 }

@@ -37,6 +37,9 @@ export function registerDesktopIpc(options: DesktopIpcOptions): () => void {
   handle('retry', retry, input => service.retry(input));
   handle('cancel', job, input => service.cancel(input));
   handle('reveal', reveal, input => service.reveal(input));
+  handle('continue-download', job, input => service.continueDownload(input));
+  handle('get-history', z.object({ offset: z.number().int().min(0).max(100000) }).strict(), input => service.getHistory(input));
+  handle('reveal-history', z.object({ id: z.string().min(1).max(100) }).strict(), input => service.revealHistory(input));
   const unsubscribe = service.onState(state => {
     const window = getWindow();
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed() && withoutHash(window.webContents.mainFrame.url) === withoutHash(options.trustedUrl)) window.webContents.send('downloader:state', state);

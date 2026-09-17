@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, relative, resolve } from 'node:path';
-import type { DownloadMode, DownloadQueueItem, DownloadSelection, DownloadSelectionRequest, DownloadSnapshot, DownloadStartRequest, TrackProgress } from '../../shared/desktop';
+import type { DownloadArchiveMetadata, DownloadHistoryPage, DownloadMode, DownloadQueueItem, DownloadSelection, DownloadSelectionRequest, DownloadSnapshot, DownloadStartRequest, TrackProgress } from '../../shared/desktop';
+import type { DownloadHistory } from './download-history';
+import { resolveWorkId } from '../douyin/target-work';
 import type { MediaTrack, RunEvent } from '../../shared/contracts';
 import type { CaptureInput, CaptureResult } from '../douyin/capture-page';
 import type { DownloadOptions } from '../douyin/download';
@@ -11,6 +13,7 @@ import { redactText } from '../security/redact';
 import { buildMediaCatalog, selectCatalogJobs, type CatalogEntry, type CatalogJob } from './media-catalog';
 
 export interface DownloadServiceDependencies {
+  history?: Pick<DownloadHistory, 'list' | 'get' | 'find' | 'record'>;
   capture(input: CaptureInput, signal: AbortSignal): Promise<CaptureResult>;
   download(options: DownloadOptions, signal: AbortSignal): Promise<DesktopDownloadResult>;
   chooseDirectory(current: string): Promise<string | null>;
@@ -27,6 +30,9 @@ interface Job {
   /** Assigned once after validation; preference changes never alter a batch's root. */
   batchRoot?: string;
   choose?: (choice: Choice) => void;
+  continueDuplicate?: () => void;
+  archive?: DownloadArchiveMetadata;
+  checkedWorkId?: string;
   active?: { task: QueueTask; token: object };
   samples: Map<string, { bytes: number; time: number }>;
   expiresAt?: number;
@@ -79,7 +85,44 @@ export class DownloadService {
     this.job = job; this.retained = job;
     // Install the cleanup promise before publishing, because observers can request cancellation.
     job.done = Promise.resolve().then(() => this.prepare(job, pageUrl, directory, input.interactive === true));
-    this.publish({ id: job.id, phase: 'parsing', directory, resultDirectory: directory, captureMode: input.interactive ? 'interactive' : 'background', captureFallback: false, title: undefined, targetWorkId: undefined, message: input.interactive ? '请在打开的抖音网页中播放目标视频。' : '正在后台读取视频，请稍候…', candidates: [], tracks: [], queue: [], mode: undefined, outputPath: undefined, reportPath: undefined });
+    this.publish({ id: job.id, phase: 'parsing', directory, resultDirectory: directory, captureMode: input.interactive ? 'interactive' : 'background', captureFallback: false, title: undefined, targetWorkId: undefined, duplicate: undefined, historyWarning: undefined, message: input.interactive ? '请在打开的抖音网页中播放目标视频。' : '正在后台读取视频，请稍候…', candidates: [], tracks: [], queue: [], mode: undefined, outputPath: undefined, reportPath: undefined });
+  }
+  async getHistory(input: { offset: number }): Promise<DownloadHistoryPage> {
+    if (!validKeys(input, ['offset']) || !Number.isSafeInteger(input.offset) || input.offset < 0 || input.offset > 100000) throw new Error('历史记录页码无效。');
+    try { return await this.dependencies.history?.list(input.offset, 20) ?? { items: [], total: 0, offset: 0, limit: 20 }; }
+    catch { throw new Error('无法读取下载历史，请重试。'); }
+  }
+  async revealHistory(input: { id: string }): Promise<void> {
+    if (!validKeys(input, ['id']) || !validId(input.id)) throw new Error('历史记录无效。');
+    try {
+      const entry = await this.dependencies.history?.get(input.id);
+      if (!entry?.available || !withinDirectory(entry.outputPath, entry.directory)) throw new Error();
+      await this.dependencies.reveal(entry.outputPath, entry.directory);
+    } catch { throw new Error('历史文件已移动、删除或无法打开，请重新下载。'); }
+  }
+  async continueDownload(input: { jobId: string }): Promise<void> {
+    if (!validKeys(input, ['jobId'])) throw new Error('请求参数无效。');
+    const job = this.requireJob(input.jobId);
+    if (this.state.phase !== 'duplicate' || !job.continueDuplicate || job.controller.signal.aborted) throw new Error('重复下载提示已失效。');
+    job.continueDuplicate();
+  }
+  private async checkDuplicate(job: Job, workId?: string): Promise<void> {
+    if (!workId || job.checkedWorkId === workId || !this.dependencies.history) return;
+    const signal = job.controller.signal;
+    let entry;
+    try { entry = await this.dependencies.history.find(workId); }
+    catch { this.publish({ historyWarning: '暂时无法检查下载历史，本次仍可下载。' }); }
+    signal.throwIfAborted(); job.checkedWorkId = workId;
+    if (!entry) return;
+    await new Promise<void>((resolveChoice, reject) => {
+      const abort = () => { job.continueDuplicate = undefined; reject(new DOMException('Cancelled', 'AbortError')); };
+      job.continueDuplicate = () => { signal.removeEventListener('abort', abort); job.continueDuplicate = undefined; resolveChoice(); };
+      signal.addEventListener('abort', abort, { once: true });
+      this.publish({ phase: 'duplicate', duplicate: entry, title: entry.title, targetWorkId: workId, message: '这个作品已下载过，原文件仍在。' });
+      if (signal.aborted) abort();
+    });
+    signal.throwIfAborted();
+    this.publish({ phase: 'parsing', duplicate: undefined, message: '正在准备重新下载…' });
   }
   async select(input: DownloadSelectionRequest): Promise<void> {
     const job = this.requireJob(input?.jobId);
@@ -166,11 +209,16 @@ export class DownloadService {
       signal.throwIfAborted();
       job.batchRoot = this.directory(await this.dependencies.validateDirectory(directory) || directory); signal.throwIfAborted();
       if (job.batchRoot !== this.state.directory) this.publish({ directory: job.batchRoot, resultDirectory: job.batchRoot });
+      await this.checkDuplicate(job, resolveWorkId(pageUrl));
       captureFallback = !interactive;
       const capture = await this.dependencies.capture({ pageUrl, observeSeconds: 30, show: interactive }, signal); signal.throwIfAborted();
       job.capture = capture;
       const title = displayText(capture.summary.title, 160, capture.requests) || '抖音作品';
       if (capture.target?.status === 'unresolved') throw new Error('无法确认链接对应的视频或声音，请检查作品链接，或打开网页播放后重试。');
+      if (capture.target?.status === 'matched' && capture.target.workId) {
+        job.archive = { workId: capture.target.workId, title, author: displayText(capture.summary.author ?? '', 80, capture.requests) || '未知作者' };
+        await this.checkDuplicate(job, capture.target.workId);
+      }
       // Each target asset is one explicitly matched video/audio combination. Do not
       // regroup all assets by shared audio, which could replace a variant's declared pair.
       job.catalog = capture.target?.status === 'matched'
@@ -190,7 +238,7 @@ export class DownloadService {
       this.publish({ phase: 'downloading', mode: job.mode, candidates: [], queue: job.tasks.map(task => ({ id: task.id, label: displayText(task.label, 160), phase: 'queued', message: '等待下载…', tracks: trackProgress(task.tracks), attempts: 0, canRetry: false })) });
       await this.execute(job, job.tasks);
     } catch (error) {
-      this.publish({ phase: cancelled(signal, error) ? 'cancelled' : 'failed', captureFallback: !cancelled(signal, error) && captureFallback, candidates: [], message: cancelled(signal, error) ? '下载已取消，可以修改上方链接后重新开始。' : errorMessage(error, job.capture), tracks: this.state.tracks.map(track => ({ ...track, bytesPerSecond: 0 })) });
+      this.publish({ phase: cancelled(signal, error) ? 'cancelled' : 'failed', duplicate: undefined, captureFallback: !cancelled(signal, error) && captureFallback, candidates: [], message: cancelled(signal, error) ? '下载已取消，可以修改上方链接后重新开始。' : errorMessage(error, job.capture), tracks: this.state.tracks.map(track => ({ ...track, bytesPerSecond: 0 })) });
     } finally { this.finish(job); }
   }
   private async execute(job: Job, tasks: QueueTask[]): Promise<void> {
@@ -203,10 +251,14 @@ export class DownloadService {
       this.updateItem(task.id, { phase: 'downloading', message: '正在验证媒体访问并下载…', tracks, attempts: item.attempts + 1, canRetry: false, outputPath: undefined, reportPath: undefined }, { phase: 'downloading', tracks, message: '正在验证媒体访问并下载…', outputPath: undefined, reportPath: undefined });
       try {
         const capture = job.capture!; const directory = job.batchRoot!;
-        const output = await this.dependencies.download({ outputDirectory: directory, captured: { runId: capture.runId, tracks: task.tracks, requests: capture.requests }, networkPolicy: { resolveHostname: createMediaResolver() }, onEvent: event => this.progress(job, token, event) }, signal);
+        const output = await this.dependencies.download({ outputDirectory: directory, archive: job.archive, captured: { runId: capture.runId, tracks: task.tracks, requests: capture.requests }, networkPolicy: { resolveHostname: createMediaResolver() }, onEvent: event => this.progress(job, token, event) }, signal);
         if (!output.committed) signal.throwIfAborted();
         const outputPath = output.outputPath ?? (output.status === 'tracks-only' ? output.tracks[0]?.path : undefined);
         if ((outputPath && !withinDirectory(outputPath, directory)) || (output.reportPath && !withinDirectory(output.reportPath, directory))) throw new Error('下载结果位置无效，请检查保存位置。');
+        if (output.status === 'complete' && outputPath && job.archive && this.dependencies.history) {
+          try { await this.dependencies.history.record(job.archive, outputPath); }
+          catch { this.publish({ historyWarning: '文件已保存，但下载历史未能写入；下次可能无法提示重复下载。' }); }
+        }
         const phase = output.status === 'complete' ? 'completed' : 'tracks-only';
         const message = output.status === 'tracks-only' ? '已保存纯视频轨；未找到对应音频，文件暂时没有声音。' : displayText(output.message, 400, capture.requests);
         const completedTracks = this.state.tracks.map(track => ({ ...track, status: 'completed' as const, bytesPerSecond: 0 }));
@@ -224,7 +276,7 @@ export class DownloadService {
     }
   }
   private finish(job: Job): void {
-    job.active = undefined; job.choose = undefined; job.samples.clear();
+    job.active = undefined; job.choose = undefined; job.continueDuplicate = undefined; job.samples.clear();
     if (this.job !== job) return;
     const queue = this.state.queue ?? [];
     const retryable = queue.some(item => ['failed', 'cancelled'].includes(item.phase));

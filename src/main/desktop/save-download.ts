@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { extname, isAbsolute, join, relative } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { downloadMedia, type DownloadOptions, type DownloadResult } from '../douyin/download';
+import { archiveName } from './archive-name';
 
 export type DesktopDownloadResult = Omit<DownloadResult, 'reportPath'> & { reportPath?: string; committed?: true };
 type Download = (options: DownloadOptions, signal: AbortSignal) => Promise<DownloadResult>;
@@ -29,7 +30,7 @@ export async function saveDesktopDownload(options: DownloadOptions, signal: Abor
     await copyExclusive(resolved, staging, signal);
     signal.throwIfAborted();
     const now = new Date(), pad = (value: number) => String(value).padStart(2, '0');
-    const stem = `${audio ? '音频' : '视频'}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const stem = archiveName(options.archive) ?? `${audio ? '音频' : '视频'}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     let outputPath = '';
     let copyToFinal = false;
     for (let suffix = 0; suffix < 10000; suffix++) {

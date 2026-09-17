@@ -17,6 +17,11 @@ it('rejects foreign senders, child frames, unexpected navigation and malformed r
   await expect(handlers.get('downloader:start')!(event, { url: 'https://douyin.com/a', directory: '/tmp', networkPolicy: { labLoopback: [] } })).rejects.toThrow();
   await expect(handlers.get('downloader:start')!(event, { url: 'https://douyin.com/a', directory: '/tmp', interactive: 'true' })).rejects.toThrow('请求参数无效');
   await expect(handlers.get('downloader:reveal')!(event, { jobId: 'abc', path: '/etc/passwd' })).rejects.toThrow();
+  expect(await handlers.get('downloader:get-history')!(event, { offset: 0 })).toMatchObject({ items: [], total: 0 });
+  await expect(handlers.get('downloader:get-history')!(event, { offset: -1 })).rejects.toThrow('请求参数无效');
+  await expect(handlers.get('downloader:reveal-history')!(event, { id: 'saved', path: '/etc/passwd' })).rejects.toThrow('请求参数无效');
+  await expect(handlers.get('downloader:continue-download')!(event, { jobId: 'old' })).rejects.toThrow();
+  await expect(handlers.get('downloader:get-history')!({ ...event, sender: {} } as IpcMainInvokeEvent, { offset: 0 })).rejects.toThrow();
   expect(service.getState().phase).toBe('idle'); dispose(); expect(handlers.size).toBe(0);
 });
 

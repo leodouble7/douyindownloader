@@ -1,4 +1,10 @@
-export type DownloadPhase = 'idle' | 'parsing' | 'choosing' | 'downloading' | 'merging' | 'verifying' | 'completed' | 'partial' | 'tracks-only' | 'cancelled' | 'failed';
+export type DownloadPhase = 'idle' | 'parsing' | 'duplicate' | 'choosing' | 'downloading' | 'merging' | 'verifying' | 'completed' | 'partial' | 'tracks-only' | 'cancelled' | 'failed';
+
+export interface DownloadArchiveMetadata { workId: string; author: string; title: string }
+export interface DownloadHistoryEntry extends DownloadArchiveMetadata {
+  id: string; outputPath: string; directory: string; completedAt: string; available: boolean;
+}
+export interface DownloadHistoryPage { items: DownloadHistoryEntry[]; total: number; offset: number; limit: number }
 
 export type DownloadMode = 'single' | 'batch';
 export interface DownloadStartRequest { url: string; directory: string; interactive?: boolean }
@@ -26,7 +32,7 @@ export interface DownloadCandidate {
 export interface DownloadQueueItem {
   id: string;
   label: string;
-  phase: Exclude<DownloadPhase, 'idle' | 'parsing' | 'choosing' | 'partial'> | 'queued';
+  phase: Exclude<DownloadPhase, 'idle' | 'parsing' | 'duplicate' | 'choosing' | 'partial'> | 'queued';
   message: string;
   tracks: TrackProgress[];
   attempts: number;
@@ -55,6 +61,8 @@ export interface DownloadSnapshot {
   captureMode?: 'background' | 'interactive';
   title?: string;
   targetWorkId?: string;
+  duplicate?: DownloadHistoryEntry;
+  historyWarning?: string;
   message: string;
   candidates: DownloadCandidate[];
   tracks: TrackProgress[];
@@ -72,11 +80,14 @@ export interface DesktopDownloaderApi {
   retry(input: { jobId: string; taskId: string }): Promise<void>;
   cancel(input: { jobId: string }): Promise<void>;
   reveal(input: { jobId: string; taskId?: string }): Promise<void>;
+  continueDownload(input: { jobId: string }): Promise<void>;
+  getHistory(input: { offset: number }): Promise<DownloadHistoryPage>;
+  revealHistory(input: { id: string }): Promise<void>;
   onState(listener: (state: DownloadSnapshot) => void): () => void;
 }
 
 export const isDownloadActive = (phase: DownloadPhase): boolean =>
-  ['parsing', 'choosing', 'downloading', 'merging', 'verifying'].includes(phase);
+  ['parsing', 'duplicate', 'choosing', 'downloading', 'merging', 'verifying'].includes(phase);
 
 declare global {
   interface Window { downloader: DesktopDownloaderApi }
