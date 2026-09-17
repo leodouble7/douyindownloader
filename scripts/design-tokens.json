@@ -1,0 +1,21 @@
+{
+  "colors": {
+    "background": "#101521",
+    "surface": "#182131",
+    "inset": "#141c2b",
+    "border": "#2d3a50",
+    "primary": "#8ab4ff",
+    "primary-hover": "#accaff",
+    "text": "#e6edf7",
+    "muted": "#aab8cb",
+    "subtle": "#8999b0",
+    "success": "#7eddb2",
+    "audio": "#bcacf3",
+    "danger": "#ffaba8",
+    "on-primary": "#12233e"
+  },
+  "rounded": {
+    "control": "8px",
+    "panel": "16px"
+  }
+}
