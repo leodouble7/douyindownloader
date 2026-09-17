@@ -1,8 +1,8 @@
 {
-  "name": "media-security-lab",
+  "name": "com.lion.douyin.downloader",
   "version": "0.1.0",
   "private": true,
-  "description": "Authorized media access-control verification desktop lab",
+  "description": "抖音视频下载桌面工具",
   "main": "out/main/index.js",
   "scripts": {
     "douyin": "node scripts/douyin.cjs",
@@ -58,8 +58,8 @@
     "node-gyp": "12.4.0"
   },
   "build": {
-    "appId": "com.medialab.security",
-    "productName": "Media Security Lab",
+    "appId": "com.lion.douyin.downloader",
+    "productName": "抖音视频下载",
     "files": [
       "out/**",
       "package.json"
