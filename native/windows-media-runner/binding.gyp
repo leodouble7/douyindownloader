@@ -9,8 +9,8 @@
     }
   },
   "targets": [
-    {"target_name": "media_job_runner", "sources": ["media_job_runner.cc"]},
-    {"target_name": "media_runner_fixture", "sources": ["../../tests/native/windows-media-fixture.cc"]},
-    {"target_name": "media_command_line_test", "sources": ["../../tests/native/media-command-line.test.cc"]}
+    {"target_name": "media_job_runner", "type": "executable", "product_extension": "exe", "sources": ["media_job_runner.cc"]},
+    {"target_name": "media_runner_fixture", "type": "executable", "product_extension": "exe", "sources": ["../../tests/native/windows-media-fixture.cc"]},
+    {"target_name": "media_command_line_test", "type": "executable", "product_extension": "exe", "sources": ["../../tests/native/media-command-line.test.cc"]}
   ]
 }

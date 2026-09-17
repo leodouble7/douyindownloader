@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createDesktopService } from './desktop/runtime';
@@ -30,6 +30,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   service = createDesktopService(() => mainWindow); await service.initialize();
   disposeIpc = registerDesktopIpc({ ipcMain, getWindow: () => mainWindow, trustedUrl, service });
   mainWindow = createMainWindow();
